@@ -1,37 +1,37 @@
-\documentclass[conference]{IEEEtran}
-\usepackage{cite}
-\usepackage{amsmath,amssymb,amsfonts}
-\usepackage{algorithmic}
-\usepackage{graphicx}
-\usepackage{textcomp}
-\usepackage{xcolor}
+\documentclass[10pt,twocolumn]{article}
+\usepackage[margin=0.75in]{geometry}
+\usepackage{amsmath,amssymb}
 \usepackage{booktabs}
 \usepackage{hyperref}
+\usepackage{microtype}
+
+\title{\textbf{A Lightweight Defense Architecture Against Indirect Prompt Injection in Tool-Calling AI Agents}}
+
+\author{
+  \textbf{Tarek Mohamed} \\
+  Independent Researcher / EgyCode \\
+  Email: \texttt{seotarek@gmail.com}
+}
+\date{September 2026}
 
 \begin{document}
-
-\title{A Lightweight Defense Architecture Against Indirect Prompt Injection in Tool-Calling AI Agents}
-
-\author{\IEEEauthorblockN{Tarek Mohamed}
-\IEEEauthorblockA{\textit{Independent Researcher / EgyCode} \\
-Email: seotarek@gmail.com}
-}
 
 \maketitle
 
 \begin{abstract}
-The rapid integration of Large Language Models (LLMs) into autonomous agent workflows has introduced significant security vulnerabilities, most notably Indirect Prompt Injection (IPI). As agents rely on external tools and protocols such as the Model Context Protocol (MCP) to fetch data from web queries, APIs, and databases, untrusted content can hijack execution flow. While foundation-model evaluators (LLM-as-a-judge) offer a potential defense, their prohibitive computational overhead (400--1200\,ms) and high operational costs preclude practical adoption. We introduce \textbf{LightGuard-Agent}, a three-tier defense architecture combining deterministic syntactic sanitization, sub-millisecond semantic intent heuristics, and an execution policy firewall. Empirical evaluation across 50 adversarial and benign scenarios demonstrates that LightGuard-Agent reduces the Attack Success Rate (ASR) from 100.0\% to 0.0\% while introducing zero false positives and an average latency of only 0.059\,ms.
+The rapid integration of Large Language Models (LLMs) into autonomous agent workflows has introduced significant security vulnerabilities, most notably Indirect Prompt Injection (IPI). As agents rely on external tools and protocols such as the Model Context Protocol (MCP) to fetch data from web queries, APIs, and databases, untrusted content can hijack execution flow. While foundation-model evaluators (LLM-as-a-judge) offer a potential defense, their prohibitive computational overhead (400--1200\,ms) and high operational costs preclude practical adoption in latency-sensitive pipelines. We introduce \textbf{LightGuard-Agent}, a three-tier defense architecture combining deterministic syntactic sanitization, sub-millisecond semantic intent heuristics, and an execution policy action firewall. Empirical evaluation across 50 adversarial and benign scenarios demonstrates that LightGuard-Agent reduces the Attack Success Rate (ASR) from 100.0\% to 0.0\% while introducing zero false positives and an average latency of only 0.059\,ms.
 \end{abstract}
 
-\begin{IEEEkeywords}
-Large Language Models, LLM Security, Indirect Prompt Injection, Autonomous Agents, Model Context Protocol, AI Safety.
-\end{IEEEkeywords}
+\noindent\textbf{Keywords:} Large Language Models, LLM Security, Indirect Prompt Injection, Autonomous Agents, Model Context Protocol, AI Safety.
 
 \section{Introduction}
 Autonomous agent frameworks such as ReAct and the Model Context Protocol (MCP) enable LLMs to interface with digital environments via tool calling. However, when an agent processes untrusted third-party data, adversaries can embed instructions that subvert original system prompts. Traditional regex filters are easily evaded, whereas secondary LLM evaluators introduce unsustainable latency overheads. This paper presents LightGuard-Agent, achieving enterprise-grade security at sub-millisecond execution speeds.
 
 \section{Threat Model and Architecture}
-We formalize the agent tool loop as: $\text{User Intent} \rightarrow \text{Planner} \rightarrow \text{Tool Execution} \rightarrow \text{Observation} \rightarrow \text{Action}$.
+We formalize the agent tool loop as:
+\[
+\text{User Intent} \rightarrow \text{Planner} \rightarrow \text{Tool Execution} \rightarrow \text{Observation} \rightarrow \text{Action}
+\]
 LightGuard-Agent deploys three coordinated tiers:
 \begin{enumerate}
     \item \textbf{Tier 1 (Syntactic Sanitizer):} Neutralizes pseudo-system delimiter tags and encapsulates observations within strict XML boundaries ($0.036$\,ms).
@@ -42,20 +42,21 @@ LightGuard-Agent deploys three coordinated tiers:
 \section{Experimental Evaluation}
 Across 25 adversarial injection vectors and 25 benign control samples:
 \begin{itemize}
-    \item \textbf{Vanilla ReAct:} ASR 100.0\%, FPR 0.0\%, Latency 0.00\,ms.
-    \item \textbf{Regex Only:} ASR 28.0\%, FPR 0.0\%, Latency 0.036\,ms.
-    \item \textbf{Llama-Guard 3:} ASR 8.0\%, FPR 4.0\%, Latency 450--1200\,ms.
+    \item \textbf{Vanilla ReAct Agent:} ASR 100.0\%, FPR 0.0\%, Latency 0.00\,ms.
+    \item \textbf{Regex Only (Tier 1):} ASR 28.0\%, FPR 0.0\%, Latency 0.036\,ms.
+    \item \textbf{Llama-Guard 3 (LLM-as-a-Judge):} ASR 8.0\%, FPR 4.0\%, Latency 450--1200\,ms.
     \item \textbf{LightGuard-Agent (Ours):} ASR 0.0\% (100\% Mitigation), FPR 0.0\%, Mean Latency 0.059\,ms (P95 0.158\,ms).
 \end{itemize}
 
 \section{Conclusion}
 LightGuard-Agent provides a practical, scalable blueprint for securing autonomous agent ecosystems without compromising real-time performance.
 
-\begin{thebibliography}{00}
-\bibitem{b1} K. Greshake et al., ``Not what you've signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection,'' \textit{arXiv:2302.12173}, 2023.
-\bibitem{b2} S. Yao et al., ``ReAct: Synergizing Reasoning and Acting in Language Models,'' \textit{ICLR}, 2023.
-\bibitem{b3} OWASP, ``Top 10 for Large Language Model Applications,'' 2023.
-\bibitem{b4} Anthropic, ``Model Context Protocol Specification,'' 2024.
+\begin{thebibliography}{99}
+\bibitem{greshake2023} K. Greshake et al., ``Not what you've signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection,'' \textit{arXiv:2302.12173}, 2023.
+\bibitem{yao2023} S. Yao et al., ``ReAct: Synergizing Reasoning and Acting in Language Models,'' in \textit{Proc. ICLR}, 2023.
+\bibitem{owasp2023} OWASP Foundation, ``Top 10 for Large Language Model Applications,'' 2023.
+\bibitem{mcp2024} Anthropic, ``Model Context Protocol Specification,'' 2024.
+\bibitem{inan2023} H. Inan et al., ``Llama Guard: LLM-based Input-Output Safeguard for Human-AI Conversations,'' \textit{Meta AI}, 2023.
 \end{thebibliography}
 
 \end{document}
