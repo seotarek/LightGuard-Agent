@@ -1,13 +1,16 @@
 # LightGuard-Agent 🛡️
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22731104.svg)](https://doi.org/10.5281/zenodo.22731104)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![arXiv cs.CR](https://img.shields.io/badge/arXiv-cs.CR%20%7C%20cs.AI-b31b1b.svg)](https://arxiv.org/)
 
 **A Lightweight, Multi-Tier Defense Architecture Against Indirect Prompt Injection in Tool-Calling AI Agents and Model Context Protocol (MCP) Workflows.**
 
 Developed by **Tarek Mohamed** ([@seotarek](https://github.com/seotarek))  
-Paper Draft: [Available on Google Docs](https://docs.google.com/document/d/1VwtS1qpWhl4xP6KOBUUY7HdEuMEOWFY-ZyVP-tuW7nA/edit) and in `paper/paper.md`.
+Permanent DOI: [10.5281/zenodo.22731104](https://doi.org/10.5281/zenodo.22731104)  
+Official Zenodo Record: [https://zenodo.org/records/22731104](https://zenodo.org/records/22731104)  
+Full Paper Manuscript: [Available in `paper/paper.md`](paper/paper.md) and [Compiled PDF](https://drive.google.com/file/d/1V_A-VUjn_K0ROXf_vVo3EA3DFCY7ouyz/view?usp=drivesdk).
 
 ---
 
@@ -116,8 +119,10 @@ If you use LightGuard-Agent in your research, please cite:
   title={A Lightweight Defense Architecture Against Indirect Prompt Injection in Tool-Calling AI Agents},
   author={Mohamed, Tarek},
   year={2026},
-  howpublished={arXiv preprint},
-  url={https://github.com/seotarek/LightGuard-Agent}
+  month={September},
+  doi={10.5281/zenodo.22731104},
+  publisher={Zenodo},
+  howpublished={\url{https://zenodo.org/records/22731104}}
 }
 ```
 
