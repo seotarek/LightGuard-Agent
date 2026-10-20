@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lightguard-agent"
-version = "0.1.0"
+version = "0.2.0"
 description = "A Lightweight Defense Architecture Against Indirect Prompt Injection in Tool-Calling AI Agents and MCP Workflows"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -20,7 +20,8 @@ keywords = [
     "security",
     "llm-guard",
     "cybersecurity",
-    "agentic-ai"
+    "agentic-ai",
+    "langchain"
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -46,6 +47,17 @@ benchmark = [
     "numpy>=1.24.0",
     "pandas>=2.0.0"
 ]
+demo = [
+    "gradio>=4.0.0"
+]
+all = [
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "gradio>=4.0.0"
+]
+
+[project.scripts]
+lightguard = "lightguard.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/seotarek/LightGuard-Agent"
