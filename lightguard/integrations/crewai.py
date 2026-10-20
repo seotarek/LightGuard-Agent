@@ -1,4 +1,4 @@
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from lightguard.core import LightGuardAgent
 from lightguard.decorators import protect_tool
