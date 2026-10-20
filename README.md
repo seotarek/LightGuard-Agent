@@ -2,7 +2,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22731104.svg)](https://doi.org/10.5281/zenodo.22731104)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![CI](https://github.com/seotarek/LightGuard-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/seotarek/LightGuard-Agent/actions/workflows/ci.yml)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![arXiv cs.CR](https://img.shields.io/badge/arXiv-cs.CR%20%7C%20cs.AI-b31b1b.svg)](https://arxiv.org/)
 
 **A Lightweight, Multi-Tier Defense Architecture Against Indirect Prompt Injection in Tool-Calling AI Agents and Model Context Protocol (MCP) Workflows.**
@@ -68,11 +69,16 @@ Evaluated across **50 standardized test scenarios** (25 diverse IPI attack vecto
 ## 🚀 Quickstart
 
 ### 1. Installation
-Clone the repository and install requirements:
+Clone the repository and install:
 ```bash
 git clone https://github.com/seotarek/LightGuard-Agent.git
 cd LightGuard-Agent
-pip install -r requirements.txt
+pip install -e .
+```
+
+To run the unit test suite:
+```bash
+python3 -m unittest discover -s tests
 ```
 
 ### 2. Usage in Your Agent Loop

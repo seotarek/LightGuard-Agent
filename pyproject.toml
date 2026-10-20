@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lightguard-agent"
+version = "0.1.0"
+description = "A Lightweight Defense Architecture Against Indirect Prompt Injection in Tool-Calling AI Agents and MCP Workflows"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Tarek Mohamed", email = "seotarek@gmail.com" }
+]
+keywords = [
+    "ai-agent",
+    "prompt-injection",
+    "mcp",
+    "model-context-protocol",
+    "security",
+    "llm-guard",
+    "cybersecurity",
+    "agentic-ai"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence"
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "ruff>=0.1.0"
+]
+benchmark = [
+    "numpy>=1.24.0",
+    "pandas>=2.0.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/seotarek/LightGuard-Agent"
+Repository = "https://github.com/seotarek/LightGuard-Agent"
+"Zenodo DOI" = "https://doi.org/10.5281/zenodo.18873095"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lightguard*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
