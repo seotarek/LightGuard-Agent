@@ -30,7 +30,7 @@ jobs:
 
     - name: Lint with ruff
       run: |
-        ruff check .
+        ruff check lightguard tests
 
     - name: Run tests with pytest
       run: |

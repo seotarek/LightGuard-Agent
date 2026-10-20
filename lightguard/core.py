@@ -1,6 +1,7 @@
 import re
 import time
-from typing import Dict, Any, List, Tuple
+from typing import Any, ClassVar
+
 
 class Tier1SyntacticSanitizer:
     """
@@ -8,20 +9,21 @@ class Tier1SyntacticSanitizer:
     Escapes dangerous delimiters, neutralizes known imperative attack patterns,
     and isolates untrusted external data into strict XML-style observation blocks.
     """
-    KNOWN_INJECTION_PATTERNS = [
-        re.compile(r'(?i)\bignore\s+(all\s+)?(previous|prior|above)\s+instructions\b'),
-        re.compile(r'(?i)\bdisregard\s+(the\s+)?(system|previous|prior)\s+(prompt|instructions)\b'),
-        re.compile(r'(?i)\byou\s+are\s+now\s+(a\s+)?new\s+(ai|assistant|model)\b'),
-        re.compile(r'(?i)\bsystem\s*:\s*override\b'),
-        re.compile(r'(?i)\bpriority\s+command\s*:\s*\b'),
-        re.compile(r'(?i)\bprint\s+(all\s+)?(hidden|secret|api|key|environment|developer)\b'),
-        re.compile(r'(?i)\bforward\s+(all\s+)?(data|secrets|messages|credentials)\b'),
-        re.compile(r'(?i)\bexecute\s+command\s*:\s*\b'),
-        re.compile(r'(?i)\badmin\s+mode\s+enabled\b'),
-        re.compile(r'(?i)\b(exec_bash|drop_table|delete_file|execute_sql|transfer_funds)\s*\(')
+
+    KNOWN_INJECTION_PATTERNS: ClassVar[list[re.Pattern]] = [
+        re.compile(r"(?i)\bignore\s+(all\s+)?(previous|prior|above)\s+instructions\b"),
+        re.compile(r"(?i)\bdisregard\s+(the\s+)?(system|previous|prior)\s+(prompt|instructions)\b"),
+        re.compile(r"(?i)\byou\s+are\s+now\s+(a\s+)?new\s+(ai|assistant|model)\b"),
+        re.compile(r"(?i)\bsystem\s*:\s*override\b"),
+        re.compile(r"(?i)\bpriority\s+command\s*:\s*\b"),
+        re.compile(r"(?i)\bprint\s+(all\s+)?(hidden|secret|api|key|environment|developer)\b"),
+        re.compile(r"(?i)\bforward\s+(all\s+)?(data|secrets|messages|credentials)\b"),
+        re.compile(r"(?i)\bexecute\s+command\s*:\s*\b"),
+        re.compile(r"(?i)\badmin\s+mode\s+enabled\b"),
+        re.compile(r"(?i)\b(exec_bash|drop_table|delete_file|execute_sql|transfer_funds)\s*\("),
     ]
 
-    DELIMITER_TAGS = [
+    DELIMITER_TAGS: ClassVar[list[tuple[str, str]]] = [
         ("```system", "```escaped_system"),
         ("<system>", "&lt;system&gt;"),
         ("</system>", "&lt;/system&gt;"),
@@ -30,7 +32,7 @@ class Tier1SyntacticSanitizer:
     ]
 
     @staticmethod
-    def sanitize(raw_text: str) -> Tuple[str, bool, float]:
+    def sanitize(raw_text: str) -> tuple[str, bool, float]:
         start_t = time.perf_counter()
         flagged = False
         cleaned = raw_text
@@ -49,8 +51,10 @@ class Tier1SyntacticSanitizer:
                 cleaned = pattern.sub(replacement, cleaned)
 
         # Encapsulate untrusted data into strict bounded observation tags
-        bounded_content = f"<untrusted_observation origin='external_tool'>\n{cleaned}\n</untrusted_observation>"
-        
+        bounded_content = (
+            f"<untrusted_observation origin='external_tool'>\n{cleaned}\n</untrusted_observation>"
+        )
+
         elapsed_ms = (time.perf_counter() - start_t) * 1000.0
         return bounded_content, flagged, elapsed_ms
 
@@ -61,26 +65,27 @@ class Tier2SemanticClassifier:
     Extracts imperative intent density, instruction hijacking cues,
     and exfiltration semantics without full LLM generation overhead.
     """
-    IMPERATIVE_VERBS = {
+
+    IMPERATIVE_VERBS: ClassVar[set[str]] = {
         "send", "email", "delete", "post", "curl", "fetch", "forward",
         "drop", "exfiltrate", "transmit", "modify", "update", "execute",
         "transfer", "leak", "dump"
     }
-    TARGET_ENTITIES = {
+    TARGET_ENTITIES: ClassVar[set[str]] = {
         "password", "secret", "token", "credential", "api_key", "database",
         "private", "auth", "session", "user_data", "cookie", "account",
         "funds", "keys", "table"
     }
-    AUTHORITY_OVERRIDE_TERMS = {
+    AUTHORITY_OVERRIDE_TERMS: ClassVar[set[str]] = {
         "emergency", "urgent", "administrator", "root", "developer_mode",
         "override", "priority_command", "jailbreak", "instruction"
     }
 
     @staticmethod
-    def analyze(text: str) -> Tuple[float, bool, float]:
+    def analyze(text: str) -> tuple[float, bool, float]:
         start_t = time.perf_counter()
         lowered = text.lower()
-        tokens = set(re.findall(r'\b\w+\b', lowered))
+        tokens = set(re.findall(r"\b\w+\b", lowered))
 
         imperative_count = len(tokens.intersection(Tier2SemanticClassifier.IMPERATIVE_VERBS))
         target_count = len(tokens.intersection(Tier2SemanticClassifier.TARGET_ENTITIES))
@@ -111,7 +116,8 @@ class Tier3ActionFirewall:
     Validates agent proposed tool calls against security policies and
     flags high-stakes operations if previous observations were untrusted.
     """
-    HIGH_STAKES_TOOLS = {
+
+    HIGH_STAKES_TOOLS: ClassVar[set[str]] = {
         "send_email", "delete_file", "drop_table", "execute_sql",
         "http_post", "transfer_funds", "modify_permissions", "exec_bash"
     }
@@ -119,15 +125,19 @@ class Tier3ActionFirewall:
     @staticmethod
     def validate_action(
         proposed_tool: str,
-        tool_args: Dict[str, Any],
+        tool_args: dict[str, Any],
         is_observation_untrusted: bool
-    ) -> Tuple[bool, str, float]:
+    ) -> tuple[bool, str, float]:
         start_t = time.perf_counter()
-        
+
         # Policy 1: Block High-Stakes tools automatically if triggered by untrusted observation
         if is_observation_untrusted and proposed_tool in Tier3ActionFirewall.HIGH_STAKES_TOOLS:
             elapsed_ms = (time.perf_counter() - start_t) * 1000.0
-            return False, f"Action Firewall Blocked: Tool '{proposed_tool}' is high-stakes and untrusted context was detected.", elapsed_ms
+            return (
+                False,
+                f"Action Firewall Blocked: Tool '{proposed_tool}' is high-stakes and untrusted context was detected.",
+                elapsed_ms
+            )
 
         # Policy 2: Check for exfiltration payloads in tool arguments
         for k, v in tool_args.items():
@@ -145,12 +155,13 @@ class LightGuardAgent:
     Unified LightGuard-Agent Orchestrator.
     Combines Tier 1, Tier 2, and Tier 3 into an integrated defense pipeline.
     """
+
     def __init__(self):
         self.t1 = Tier1SyntacticSanitizer()
         self.t2 = Tier2SemanticClassifier()
         self.t3 = Tier3ActionFirewall()
 
-    def process_observation(self, raw_observation: str) -> Dict[str, Any]:
+    def process_observation(self, raw_observation: str) -> dict[str, Any]:
         sanitized_text, t1_flagged, t1_ms = self.t1.sanitize(raw_observation)
         risk_score, t2_flagged, t2_ms = self.t2.analyze(raw_observation)
 
@@ -165,7 +176,9 @@ class LightGuardAgent:
             "latency_breakdown": {"t1_ms": t1_ms, "t2_ms": t2_ms}
         }
 
-    def verify_action(self, proposed_tool: str, tool_args: Dict[str, Any], is_untrusted: bool) -> Dict[str, Any]:
+    def verify_action(
+        self, proposed_tool: str, tool_args: dict[str, Any], is_untrusted: bool
+    ) -> dict[str, Any]:
         allowed, reason, t3_ms = self.t3.validate_action(proposed_tool, tool_args, is_untrusted)
         return {
             "allowed": allowed,
