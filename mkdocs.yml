@@ -41,6 +41,10 @@ nav:
   - Overview: index.md
   - Quickstart: quickstart.md
   - Security Defenses: defenses.md
+  - RAG Context Shield: rag.md
+  - DLP & Privacy Redaction: privacy.md
+  - Security Policies: policy.md
+  - Telemetry & Observability: telemetry.md
   - Universal Wrapper & Middleware: wrapper.md
   - Model Context Protocol: mcp.md
   - Framework Integrations: integrations.md

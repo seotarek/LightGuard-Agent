@@ -4,6 +4,9 @@ from typing import Any, ClassVar, Optional
 
 from lightguard.canary import CanaryGuard
 from lightguard.obfuscation import Tier0ObfuscationShield
+from lightguard.policy import SecurityPolicyConfig
+from lightguard.privacy import PrivacyGuard
+from lightguard.telemetry import SecurityTelemetryCollector
 
 
 class Tier1SyntacticSanitizer:
@@ -157,33 +160,75 @@ class LightGuardAgent:
     """
     Unified LightGuard-Agent Orchestrator.
     Combines Tier 0 (Steganography/Obfuscation), Tier 1 (Syntactic Delimiter Shield),
-    Tier 2 (Semantic Intent Heuristics), and Tier 3 (Action Firewall) with
-    Cryptographic Canary verification into a sub-millisecond defense pipeline.
+    Tier 2 (Semantic Intent Heuristics), Tier 3 (Action Firewall),
+    Cryptographic Canary verification, and optional DLP Privacy Redaction into
+    a sub-millisecond enterprise defense pipeline.
     """
 
-    def __init__(self, canary_guard: Optional[CanaryGuard] = None):
+    def __init__(
+        self,
+        canary_guard: Optional[CanaryGuard] = None,
+        policy: Optional[SecurityPolicyConfig] = None,
+        enable_telemetry: bool = True,
+    ):
+        self.policy = policy if policy is not None else SecurityPolicyConfig.balanced()
         self.t0 = Tier0ObfuscationShield()
         self.t1 = Tier1SyntacticSanitizer()
         self.t2 = Tier2SemanticClassifier()
         self.t3 = Tier3ActionFirewall()
         self.canary = canary_guard if canary_guard is not None else CanaryGuard()
+        self.enable_telemetry = enable_telemetry
+        self.telemetry = SecurityTelemetryCollector.get_instance() if enable_telemetry else None
 
     def process_observation(self, raw_observation: str) -> dict[str, Any]:
-        t0_res = self.t0.normalize(raw_observation)
-        inspection_buffer = t0_res["inspection_buffer"]
+        # Optional DLP / PII redaction
+        dlp_redacted = raw_observation
+        dlp_mapping: dict[str, str] = {}
+        if self.policy.enable_dlp_redaction:
+            dlp_redacted, dlp_mapping, _ = PrivacyGuard.redact(raw_observation)
+            if self.enable_telemetry and self.telemetry and dlp_mapping:
+                self.telemetry.record_pii_redaction(len(dlp_mapping))
+
+        # Tier 0 Normalization
+        if self.policy.enable_obfuscation_shield:
+            t0_res = self.t0.normalize(dlp_redacted)
+            inspection_buffer = t0_res["inspection_buffer"]
+        else:
+            t0_res = {
+                "was_obfuscated": False,
+                "entropy": 0.0,
+                "decoded_payloads": [],
+                "elapsed_ms": 0.0,
+            }
+            inspection_buffer = dlp_redacted
 
         sanitized_text, t1_flagged, t1_ms = self.t1.sanitize(inspection_buffer)
         risk_score, t2_flagged, t2_ms = self.t2.analyze(inspection_buffer)
 
         # Check for Canary token leak inside observation
-        canary_leaked, leaked_token = self.canary.check_leakage(raw_observation)
-        if canary_leaked:
-            t1_flagged = True
-            risk_score = 1.0
+        canary_leaked = False
+        leaked_token = None
+        if self.policy.enable_canary_guard:
+            canary_leaked, leaked_token = self.canary.check_leakage(raw_observation)
+            if canary_leaked:
+                t1_flagged = True
+                risk_score = 1.0
 
-        is_untrusted = t1_flagged or t2_flagged or t0_res["was_obfuscated"]
+        is_untrusted = (
+            t1_flagged
+            or (risk_score >= self.policy.risk_threshold)
+            or t0_res["was_obfuscated"]
+        )
 
         total_ms = t0_res["elapsed_ms"] + t1_ms + t2_ms
+
+        if self.enable_telemetry and self.telemetry:
+            self.telemetry.record_observation(
+                is_blocked=is_untrusted,
+                was_obfuscated=t0_res["was_obfuscated"],
+                canary_violated=canary_leaked,
+                latency_ms=total_ms,
+            )
 
         return {
             "sanitized_observation": sanitized_text,
@@ -194,6 +239,8 @@ class LightGuardAgent:
             "t2_risk_score": risk_score,
             "canary_leaked": canary_leaked,
             "leaked_token": leaked_token,
+            "dlp_redacted": self.policy.enable_dlp_redaction and bool(dlp_mapping),
+            "dlp_mapping": dlp_mapping,
             "is_untrusted": is_untrusted,
             "total_latency_ms": total_ms,
             "latency_breakdown": {
@@ -208,18 +255,40 @@ class LightGuardAgent:
     ) -> dict[str, Any]:
         start_t = time.perf_counter()
 
+        # Whitelist override
+        if proposed_tool in self.policy.whitelisted_tools:
+            return {"allowed": True, "reason": "Whitelisted tool", "t3_latency_ms": 0.001}
+
         # Step 1: Verify tool arguments against active Canary tokens
-        canary_safe, canary_reason = self.canary.verify_action_arguments(proposed_tool, tool_args)
-        if not canary_safe:
+        if self.policy.enable_canary_guard:
+            canary_safe, canary_reason = self.canary.verify_action_arguments(proposed_tool, tool_args)
+            if not canary_safe:
+                elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+                if self.enable_telemetry and self.telemetry:
+                    self.telemetry.record_action_block()
+                return {
+                    "allowed": False,
+                    "reason": canary_reason,
+                    "t3_latency_ms": elapsed_ms,
+                }
+
+        # Check custom high-stakes tools from policy
+        effective_untrusted = is_untrusted and self.policy.block_on_untrusted
+        if effective_untrusted and proposed_tool in self.policy.custom_high_stakes_tools:
             elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+            if self.enable_telemetry and self.telemetry:
+                self.telemetry.record_action_block()
             return {
                 "allowed": False,
-                "reason": canary_reason,
+                "reason": f"Action Firewall Blocked: Tool '{proposed_tool}' is designated as high-stakes by policy.",
                 "t3_latency_ms": elapsed_ms,
             }
 
         # Step 2: Validate against Action Firewall security policies
-        allowed, reason, t3_ms = self.t3.validate_action(proposed_tool, tool_args, is_untrusted)
+        allowed, reason, t3_ms = self.t3.validate_action(proposed_tool, tool_args, effective_untrusted)
+        if not allowed and self.enable_telemetry and self.telemetry:
+            self.telemetry.record_action_block()
+
         return {
             "allowed": allowed,
             "reason": reason,

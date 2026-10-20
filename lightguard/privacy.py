@@ -1,0 +1,160 @@
+import dataclasses
+import re
+import time
+from typing import ClassVar
+
+
+@dataclasses.dataclass
+class PIIDetectionResult:
+    entity_type: str
+    original_value: str
+    redacted_value: str
+    start_index: int
+    end_index: int
+    confidence: float
+
+
+class PrivacyGuard:
+    """
+    Sub-millisecond Data Loss Prevention (DLP) & PII Redaction Engine.
+    Detects and sanitizes secret credentials, API keys, private keys, credit cards (Luhn-verified),
+    social security numbers, email addresses, and phone numbers before data enters LLM context
+    or leaves through external tool calls.
+    """
+
+    # Secret / Credential patterns
+    PATTERNS_SECRETS: ClassVar[dict[str, re.Pattern]] = {
+        "OPENAI_KEY": re.compile(r"\bsk-[A-Za-z0-9_-]{32,}\b"),
+        "AWS_KEY_ID": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+        "GITHUB_TOKEN": re.compile(r"\b(?:ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{50,})\b"),
+        "SLACK_TOKEN": re.compile(r"\bxoxb-[0-9]{10,}-[0-9]{10,}-[A-Za-z0-9]{20,}\b"),
+        "PRIVATE_KEY": re.compile(r"-----BEGIN (?:RSA )?PRIVATE KEY-----[\s\S]+?-----END (?:RSA )?PRIVATE KEY-----"),
+        "JWT_TOKEN": re.compile(r"\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
+    }
+
+    # PII patterns
+    PATTERNS_PII: ClassVar[dict[str, re.Pattern]] = {
+        "EMAIL": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
+        "SSN": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+        "IPV4": re.compile(r"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b"),
+        "CREDIT_CARD_CANDIDATE": re.compile(r"\b(?:\d{4}[ -]?){3}\d{4}\b"),
+        "PHONE_NUMBER": re.compile(r"(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"),
+    }
+
+    @staticmethod
+    def validate_luhn(card_number_str: str) -> bool:
+        """Validates credit card checksum using the standard Luhn algorithm."""
+        digits = [int(c) for c in card_number_str if c.isdigit()]
+        if len(digits) < 13 or len(digits) > 19:
+            return False
+        total = 0
+        reverse_digits = digits[::-1]
+        for idx, digit in enumerate(reverse_digits):
+            if idx % 2 == 1:
+                doubled = digit * 2
+                total += doubled - 9 if doubled > 9 else doubled
+            else:
+                total += digit
+        return total % 10 == 0
+
+    @classmethod
+    def scan(cls, text: str) -> list[PIIDetectionResult]:
+        """Scans text and returns all detected PII entities and secrets with positions."""
+        results: list[PIIDetectionResult] = []
+
+        # 1. Scan API keys & credentials
+        for label, pattern in cls.PATTERNS_SECRETS.items():
+            for match in pattern.finditer(text):
+                val = match.group()
+                results.append(
+                    PIIDetectionResult(
+                        entity_type=label,
+                        original_value=val,
+                        redacted_value=f"[REDACTED_{label}]",
+                        start_index=match.start(),
+                        end_index=match.end(),
+                        confidence=0.99,
+                    )
+                )
+
+        # 2. Scan standard PII
+        for label, pattern in cls.PATTERNS_PII.items():
+            for match in pattern.finditer(text):
+                val = match.group()
+                # Special validation for credit cards to eliminate false positives
+                if label == "CREDIT_CARD_CANDIDATE":
+                    if cls.validate_luhn(val):
+                        results.append(
+                            PIIDetectionResult(
+                                entity_type="CREDIT_CARD",
+                                original_value=val,
+                                redacted_value="[REDACTED_CREDIT_CARD]",
+                                start_index=match.start(),
+                                end_index=match.end(),
+                                confidence=0.98,
+                            )
+                        )
+                else:
+                    results.append(
+                        PIIDetectionResult(
+                            entity_type=label,
+                            original_value=val,
+                            redacted_value=f"[REDACTED_{label}]",
+                            start_index=match.start(),
+                            end_index=match.end(),
+                            confidence=0.95,
+                        )
+                    )
+
+        return results
+
+    @classmethod
+    def redact(cls, text: str, reversible: bool = True) -> tuple[str, dict[str, str], float]:
+        """
+        Redacts all credentials and PII.
+        If reversible=True, provides a token substitution mapping to restore the data later.
+        Returns: (sanitized_text, reverse_mapping, elapsed_ms).
+        """
+        start_t = time.perf_counter()
+        detections = cls.scan(text)
+        if not detections:
+            elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+            return text, {}, elapsed_ms
+
+        # Filter overlapping detections: prioritize earlier start and longer span
+        sorted_by_span = sorted(detections, key=lambda d: (d.start_index, -(d.end_index - d.start_index)))
+        non_overlapping: list[PIIDetectionResult] = []
+        last_end = -1
+        for d in sorted_by_span:
+            if d.start_index >= last_end:
+                non_overlapping.append(d)
+                last_end = d.end_index
+
+        # Sort detections in reverse order of appearance to replace without offsetting indices
+        sorted_detections = sorted(non_overlapping, key=lambda d: d.start_index, reverse=True)
+
+        mapping: dict[str, str] = {}
+        cleaned = text
+        token_counter = 0
+
+        for item in sorted_detections:
+            token_counter += 1
+            placeholder = (
+                f"[LG_DLP_{item.entity_type}_{token_counter:03d}]"
+                if reversible
+                else item.redacted_value
+            )
+            cleaned = cleaned[:item.start_index] + placeholder + cleaned[item.end_index:]
+            if reversible:
+                mapping[placeholder] = item.original_value
+
+        elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+        return cleaned, mapping, elapsed_ms
+
+    @staticmethod
+    def restore(redacted_text: str, mapping: dict[str, str]) -> str:
+        """Restores redacted placeholders back to original values."""
+        restored = redacted_text
+        for placeholder, original in mapping.items():
+            restored = restored.replace(placeholder, original)
+        return restored

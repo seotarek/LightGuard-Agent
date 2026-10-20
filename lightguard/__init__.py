@@ -15,11 +15,15 @@ from .core import (
 from .decorators import SecurityViolationError, protect_tool
 from .mcp import LightGuardMCPProxy
 from .obfuscation import Tier0ObfuscationShield
+from .policy import PolicyProfile, SecurityPolicyConfig
+from .privacy import PrivacyGuard
+from .rag import RAGContextShield
 from .redteam import run_redteam_audit
 from .session import StatefulSessionGuard
+from .telemetry import SecurityTelemetryCollector
 from .wrapper import wrap
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __all__ = [
     "LightGuardAgent",
     "Tier0ObfuscationShield",
@@ -29,6 +33,11 @@ __all__ = [
     "CanaryGuard",
     "CanaryViolationError",
     "StatefulSessionGuard",
+    "PrivacyGuard",
+    "RAGContextShield",
+    "SecurityPolicyConfig",
+    "PolicyProfile",
+    "SecurityTelemetryCollector",
     "protect_tool",
     "wrap",
     "SecurityViolationError",
