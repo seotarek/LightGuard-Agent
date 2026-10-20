@@ -23,7 +23,7 @@ from .session import StatefulSessionGuard
 from .telemetry import SecurityTelemetryCollector
 from .wrapper import wrap
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 __all__ = [
     "LightGuardAgent",
     "Tier0ObfuscationShield",
