@@ -40,7 +40,10 @@ markdown_extensions:
 nav:
   - Overview: index.md
   - Quickstart: quickstart.md
+  - Security Defenses: defenses.md
+  - Universal Wrapper & Middleware: wrapper.md
   - Model Context Protocol: mcp.md
   - Framework Integrations: integrations.md
+  - Red-Team & Auditing: redteam.md
   - Benchmarks: benchmarks.md
   - Research & Citation: research.md

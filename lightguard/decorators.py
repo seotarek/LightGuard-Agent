@@ -8,7 +8,7 @@ from lightguard.core import LightGuardAgent
 class SecurityViolationError(Exception):
     """Raised when an action is blocked by the LightGuard Action Firewall."""
 
-    def __init__(self, message: str, tool_name: str, reason: str):
+    def __init__(self, message: str, tool_name: str = "generic_action", reason: str = "Security violation detected"):
         super().__init__(message)
         self.tool_name = tool_name
         self.reason = reason

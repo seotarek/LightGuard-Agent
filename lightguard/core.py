@@ -1,6 +1,9 @@
 import re
 import time
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Optional
+
+from lightguard.canary import CanaryGuard
+from lightguard.obfuscation import Tier0ObfuscationShield
 
 
 class Tier1SyntacticSanitizer:
@@ -153,35 +156,72 @@ class Tier3ActionFirewall:
 class LightGuardAgent:
     """
     Unified LightGuard-Agent Orchestrator.
-    Combines Tier 1, Tier 2, and Tier 3 into an integrated defense pipeline.
+    Combines Tier 0 (Steganography/Obfuscation), Tier 1 (Syntactic Delimiter Shield),
+    Tier 2 (Semantic Intent Heuristics), and Tier 3 (Action Firewall) with
+    Cryptographic Canary verification into a sub-millisecond defense pipeline.
     """
 
-    def __init__(self):
+    def __init__(self, canary_guard: Optional[CanaryGuard] = None):
+        self.t0 = Tier0ObfuscationShield()
         self.t1 = Tier1SyntacticSanitizer()
         self.t2 = Tier2SemanticClassifier()
         self.t3 = Tier3ActionFirewall()
+        self.canary = canary_guard if canary_guard is not None else CanaryGuard()
 
     def process_observation(self, raw_observation: str) -> dict[str, Any]:
-        sanitized_text, t1_flagged, t1_ms = self.t1.sanitize(raw_observation)
-        risk_score, t2_flagged, t2_ms = self.t2.analyze(raw_observation)
+        t0_res = self.t0.normalize(raw_observation)
+        inspection_buffer = t0_res["inspection_buffer"]
 
-        is_untrusted = t1_flagged or t2_flagged
+        sanitized_text, t1_flagged, t1_ms = self.t1.sanitize(inspection_buffer)
+        risk_score, t2_flagged, t2_ms = self.t2.analyze(inspection_buffer)
+
+        # Check for Canary token leak inside observation
+        canary_leaked, leaked_token = self.canary.check_leakage(raw_observation)
+        if canary_leaked:
+            t1_flagged = True
+            risk_score = 1.0
+
+        is_untrusted = t1_flagged or t2_flagged or t0_res["was_obfuscated"]
+
+        total_ms = t0_res["elapsed_ms"] + t1_ms + t2_ms
 
         return {
             "sanitized_observation": sanitized_text,
+            "t0_was_obfuscated": t0_res["was_obfuscated"],
+            "t0_entropy": t0_res["entropy"],
+            "decoded_payloads": t0_res["decoded_payloads"],
             "t1_flagged": t1_flagged,
             "t2_risk_score": risk_score,
+            "canary_leaked": canary_leaked,
+            "leaked_token": leaked_token,
             "is_untrusted": is_untrusted,
-            "total_latency_ms": t1_ms + t2_ms,
-            "latency_breakdown": {"t1_ms": t1_ms, "t2_ms": t2_ms}
+            "total_latency_ms": total_ms,
+            "latency_breakdown": {
+                "t0_ms": t0_res["elapsed_ms"],
+                "t1_ms": t1_ms,
+                "t2_ms": t2_ms,
+            },
         }
 
     def verify_action(
         self, proposed_tool: str, tool_args: dict[str, Any], is_untrusted: bool
     ) -> dict[str, Any]:
+        start_t = time.perf_counter()
+
+        # Step 1: Verify tool arguments against active Canary tokens
+        canary_safe, canary_reason = self.canary.verify_action_arguments(proposed_tool, tool_args)
+        if not canary_safe:
+            elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+            return {
+                "allowed": False,
+                "reason": canary_reason,
+                "t3_latency_ms": elapsed_ms,
+            }
+
+        # Step 2: Validate against Action Firewall security policies
         allowed, reason, t3_ms = self.t3.validate_action(proposed_tool, tool_args, is_untrusted)
         return {
             "allowed": allowed,
             "reason": reason,
-            "t3_latency_ms": t3_ms
+            "t3_latency_ms": t3_ms,
         }

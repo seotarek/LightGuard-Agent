@@ -23,6 +23,9 @@ def cmd_scan(args: argparse.Namespace) -> int:
     print("🛡️  LightGuard-Agent Security Audit Report")
     print("=" * 60)
     print(f"Status           : {'🚨 UNTRUSTED / SUSPICIOUS' if res['is_untrusted'] else '✅ CLEAN / BENIGN'}")
+    print(f"Tier 0 Obfuscated: {res.get('t0_was_obfuscated', False)} (Entropy: {res.get('t0_entropy', 0.0):.2f})")
+    if res.get("decoded_payloads"):
+        print(f"Decoded Payloads : {res['decoded_payloads']}")
     print(f"Tier 1 Flagged   : {res['t1_flagged']} (Syntactic / Delimiter neutralization)")
     print(f"Tier 2 Risk Score: {res['t2_risk_score']:.2f} / 1.00 (Semantic intent density)")
     print(f"Engine Latency   : {res['total_latency_ms']:.4f} ms ({res['total_latency_ms'] * 1000.0:.1f} µs)")
@@ -49,6 +52,15 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_audit(args: argparse.Namespace) -> int:
+    from lightguard.redteam import format_audit_report, run_redteam_audit
+
+    print("Executing LightGuard-Agent Adversarial Red-Team Penetration Simulation...")
+    report = run_redteam_audit()
+    print(format_audit_report(report))
+    return 0 if report.failed_vectors == 0 else 1
+
+
 def cmd_version(args: argparse.Namespace) -> int:
     from lightguard import __version__
     print(f"LightGuard-Agent v{__version__}")
@@ -69,6 +81,10 @@ def main() -> None:
     scan_parser = subparsers.add_parser("scan", help="Scan and sanitize text for prompt injection")
     scan_parser.add_argument("text", nargs="?", default="", help="Text to scan (or pass via stdin)")
 
+    # audit / redteam subcommand
+    subparsers.add_parser("audit", help="Run automated adversarial red-team penetration audit")
+    subparsers.add_parser("redteam", help="Alias for audit: run adversarial penetration suite")
+
     # benchmark subcommand
     subparsers.add_parser("benchmark", help="Run empirical benchmark suite")
 
@@ -79,6 +95,8 @@ def main() -> None:
 
     if args.subcommand == "scan":
         sys.exit(cmd_scan(args))
+    elif args.subcommand in ("audit", "redteam"):
+        sys.exit(cmd_audit(args))
     elif args.subcommand == "benchmark":
         sys.exit(cmd_benchmark(args))
     elif args.subcommand == "version":
