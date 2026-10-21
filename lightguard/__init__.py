@@ -27,6 +27,7 @@ from .policy import PolicyProfile, SecurityPolicyConfig
 from .privacy import PrivacyGuard, RedactionResult
 from .rag import RAGContextShield
 from .redteam import run_redteam_audit
+from .bipia import BIPIABenchmarkReport, run_bipia_benchmark
 from .reporting import ComplianceReportGenerator
 from .session import StatefulSessionGuard
 from .structured import StructuredOutputGuard
@@ -37,6 +38,8 @@ from .wrapper import wrap
 __version__ = "0.6.2"
 __all__ = [
     "LightGuardAgent",
+    "run_bipia_benchmark",
+    "BIPIABenchmarkReport",
     "AsyncLightGuardAgent",
     "FastPatternMatcher",
     "AdversarialSuffixDetector",

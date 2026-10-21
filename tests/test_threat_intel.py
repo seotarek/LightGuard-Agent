@@ -49,3 +49,20 @@ def test_threat_intel_checksum_mismatch():
     payload = json.dumps({"signatures": []})
     with pytest.raises(ValueError, match="Threat intelligence checksum mismatch"):
         registry.import_feed_json(payload, verify_checksum="invalid_sha256_hash")
+
+
+def test_threat_intel_pattern_validation_and_redos_protection():
+    registry = ThreatIntelRegistry()
+
+    # 1. Invalid regex syntax must be rejected at registration
+    with pytest.raises(ValueError, match="Invalid regex syntax"):
+        registry.register_signature("INVALID-01", r"[unclosed_bracket")
+
+    # 2. Excessively long pattern (>1000 chars) must be rejected
+    long_pattern = "a" * 1005
+    with pytest.raises(ValueError, match="exceeds maximum limit"):
+        registry.register_signature("TOO-LONG-01", long_pattern)
+
+    # 3. Dangerous nested quantifiers susceptible to ReDoS must be rejected
+    with pytest.raises(ValueError, match="susceptible to ReDoS"):
+        registry.register_signature("REDOS-01", r"([a-z]+)+$")

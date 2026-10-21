@@ -74,6 +74,17 @@ class TestLightGuardCLI(unittest.TestCase):
             self.assertIn("Adversarial Mitigation Rate", output)
             self.assertIn("False Positive Rate", output)
 
+    def test_cmd_bipia(self):
+        from lightguard.cli import cmd_bipia
+        args = argparse.Namespace()
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+            code = cmd_bipia(args)
+            self.assertEqual(code, 0)
+            output = mock_out.getvalue()
+            self.assertIn("Microsoft BIPIA Benchmark", output)
+            self.assertIn("Adversarial Mitigation Rate", output)
+            self.assertIn("Attack Success Rate", output)
+
 
 if __name__ == "__main__":
     unittest.main()

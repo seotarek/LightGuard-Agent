@@ -7,11 +7,16 @@ offline without upgrading the core Python package.
 
 import hashlib
 import json
+import re
 from typing import Any, Dict, List, Optional, Set
 
 
 class ThreatSignature:
     """Represents a discrete verified threat signature."""
+
+    MAX_PATTERN_LENGTH = 1000
+    # Heuristic detecting nested quantifiers susceptible to ReDoS catastrophic backtracking
+    DANGEROUS_NESTED_QUANTIFIERS = re.compile(r"\([^)]*(\+|\*|\{[0-9]+,\})\)[+*]|\([a-zA-Z0-9_.\\]*(\+|\*)\)\1")
 
     def __init__(
         self,
@@ -21,6 +26,21 @@ class ThreatSignature:
         severity: str = "HIGH",
         description: str = "",
     ) -> None:
+        if not pattern or not isinstance(pattern, str):
+            raise ValueError("Threat pattern must be a non-empty string.")
+        if len(pattern) > self.MAX_PATTERN_LENGTH:
+            raise ValueError(
+                f"Threat pattern length ({len(pattern)}) exceeds maximum limit ({self.MAX_PATTERN_LENGTH})."
+            )
+        if self.DANGEROUS_NESTED_QUANTIFIERS.search(pattern):
+            raise ValueError(
+                f"Threat pattern '{pattern}' contains dangerous nested quantifiers susceptible to ReDoS."
+            )
+        try:
+            self.compiled = re.compile(pattern, re.IGNORECASE)
+        except re.error as e:
+            raise ValueError(f"Invalid regex syntax in threat signature '{signature_id}': {e}")
+
         self.signature_id = signature_id
         self.pattern = pattern
         self.category = category

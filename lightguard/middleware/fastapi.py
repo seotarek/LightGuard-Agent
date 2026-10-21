@@ -17,11 +17,13 @@ class LightGuardASGIMiddleware:
         guard: Optional[LightGuardAgent] = None,
         block_on_violation: bool = True,
         scan_paths: Optional[list[str]] = None,
+        max_body_size: int = 10 * 1024 * 1024,
     ):
         self.app = app
         self.guard = guard if guard is not None else LightGuardAgent()
         self.block = block_on_violation
         self.scan_paths = scan_paths
+        self.max_body_size = max_body_size
 
     async def __call__(self, scope: dict[str, Any], receive: Callable, send: Callable) -> None:
         if scope["type"] != "http":
@@ -41,12 +43,64 @@ class LightGuardASGIMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Buffer the body messages
+        # Check Content-Length header early
+        headers = dict(scope.get("headers", []))
+        content_length_header = headers.get(b"content-length")
+        if content_length_header:
+            try:
+                cl = int(content_length_header.decode("ascii"))
+                if cl > self.max_body_size:
+                    res_body = json.dumps({
+                        "error": "LightGuard Security Block",
+                        "message": f"Payload too large: Content-Length ({cl} bytes) exceeds maximum limit ({self.max_body_size} bytes).",
+                    }).encode("utf-8")
+                    await send({
+                        "type": "http.response.start",
+                        "status": 413,
+                        "headers": [
+                            [b"content-type", b"application/json"],
+                            [b"content-length", str(len(res_body)).encode("ascii")],
+                            [b"x-lightguard-status", b"blocked"],
+                        ],
+                    })
+                    await send({
+                        "type": "http.response.body",
+                        "body": res_body,
+                        "more_body": False,
+                    })
+                    return
+            except (ValueError, UnicodeDecodeError):
+                pass
+
+        # Buffer the body messages with strict size accounting
         body_chunks = []
+        total_bytes = 0
         more_body = True
         while more_body:
             message = await receive()
-            body_chunks.append(message.get("body", b""))
+            chunk = message.get("body", b"")
+            total_bytes += len(chunk)
+            if total_bytes > self.max_body_size:
+                res_body = json.dumps({
+                    "error": "LightGuard Security Block",
+                    "message": f"Payload too large: Request body exceeds maximum limit ({self.max_body_size} bytes).",
+                }).encode("utf-8")
+                await send({
+                    "type": "http.response.start",
+                    "status": 413,
+                    "headers": [
+                        [b"content-type", b"application/json"],
+                        [b"content-length", str(len(res_body)).encode("ascii")],
+                        [b"x-lightguard-status", b"blocked"],
+                    ],
+                })
+                await send({
+                    "type": "http.response.body",
+                    "body": res_body,
+                    "more_body": False,
+                })
+                return
+            body_chunks.append(chunk)
             more_body = message.get("more_body", False)
 
         raw_body = b"".join(body_chunks)

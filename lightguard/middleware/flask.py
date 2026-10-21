@@ -16,10 +16,12 @@ class LightGuardFlaskMiddleware:
         app: Any,
         guard: Optional[LightGuardAgent] = None,
         block_on_violation: bool = True,
+        max_body_size: int = 10 * 1024 * 1024,
     ):
         self.app = app
         self.guard = guard if guard is not None else LightGuardAgent()
         self.block = block_on_violation
+        self.max_body_size = max_body_size
 
     def __call__(self, environ: dict[str, Any], start_response: Callable) -> Any:
         method = environ.get("REQUEST_METHOD", "GET").upper()
@@ -30,10 +32,33 @@ class LightGuardFlaskMiddleware:
             except (ValueError, TypeError):
                 content_length = 0
 
+            if content_length > self.max_body_size:
+                error_body = json.dumps({
+                    "error": "LightGuard Security Block",
+                    "message": f"Payload too large: Content-Length ({content_length} bytes) exceeds limit ({self.max_body_size} bytes).",
+                }).encode("utf-8")
+                start_response("413 Payload Too Large", [
+                    ("Content-Type", "application/json"),
+                    ("Content-Length", str(len(error_body))),
+                    ("X-LightGuard-Status", "blocked"),
+                ])
+                return [error_body]
+
             if content_length > 0:
                 wsgi_input = environ.get("wsgi.input")
                 if wsgi_input:
-                    body_bytes = wsgi_input.read(content_length)
+                    body_bytes = wsgi_input.read(min(content_length, self.max_body_size + 1))
+                    if len(body_bytes) > self.max_body_size:
+                        error_body = json.dumps({
+                            "error": "LightGuard Security Block",
+                            "message": f"Payload too large: Body exceeds limit ({self.max_body_size} bytes).",
+                        }).encode("utf-8")
+                        start_response("413 Payload Too Large", [
+                            ("Content-Type", "application/json"),
+                            ("Content-Length", str(len(error_body))),
+                            ("X-LightGuard-Status", "blocked"),
+                        ])
+                        return [error_body]
                     # Reset input buffer for subsequent framework reads
                     from io import BytesIO
                     environ["wsgi.input"] = BytesIO(body_bytes)

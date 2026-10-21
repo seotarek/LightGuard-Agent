@@ -11,8 +11,8 @@
 [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Live%20Playground-yellow)](https://huggingface.co/spaces/seotarek/LightGuard-Agent)
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://seotarek.github.io/LightGuard-Agent/)
 [![CI](https://github.com/seotarek/LightGuard-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/seotarek/LightGuard-Agent/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-105%2F105%20passed-success.svg)](https://github.com/seotarek/LightGuard-Agent/actions)
-[![Coverage](https://img.shields.io/badge/coverage-82%25%20(core%2094%25)-brightgreen.svg)](https://github.com/seotarek/LightGuard-Agent/actions)
+[![Tests](https://img.shields.io/badge/tests-113%2F113%20passed-success.svg)](https://github.com/seotarek/LightGuard-Agent/actions)
+[![Coverage](https://img.shields.io/badge/coverage-85%25%20(core%2096%25)-brightgreen.svg)](https://github.com/seotarek/LightGuard-Agent/actions)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0%20external-purple.svg)](https://pypi.org/project/lightguard-agent/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -21,7 +21,7 @@
   <a href="https://seotarek.github.io/LightGuard-Agent/"><b>📚 Documentation</b></a> •
   <a href="https://huggingface.co/spaces/seotarek/LightGuard-Agent"><b>🤗 Live Playground</b></a> •
   <a href="https://doi.org/10.5281/zenodo.22731104"><b>📄 Research Paper</b></a> •
-  <a href="https://github.com/seotarek/LightGuard-Agent/releases/tag/v0.6.1"><b>🚀 Release v0.6.1</b></a>
+  <a href="https://github.com/seotarek/LightGuard-Agent/releases/tag/v0.6.2"><b>🚀 Release v0.6.2</b></a>
 </p>
 
 </div>

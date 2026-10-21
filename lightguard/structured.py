@@ -39,6 +39,56 @@ class StructuredOutputGuard:
             "destination",
         }
 
+    def _validate_node(
+        self,
+        key: str,
+        val: Any,
+        violations: List[str],
+        strict_shell_check: bool,
+        current_depth: int = 0,
+        max_depth: int = 10,
+    ) -> Any:
+        if current_depth > max_depth:
+            return val
+
+        if isinstance(val, str):
+            # 1. Scan for prompt injection directives
+            obs = self.guard.process_observation(val)
+            clean_val = val
+            if obs["is_untrusted"]:
+                violations.append(f"Prompt injection in argument '{key}': {obs['threat_categories']}")
+                clean_val = obs["clean_text"]
+
+            # 2. Check sensitive arguments for dangerous shell escapes or path traversal
+            if strict_shell_check and (key.lower() in self.sensitive_arg_keys or "../" in val or "..\\" in val or "/etc/" in val):
+                if "../" in val or "..\\" in val or "/etc/" in val:
+                    violations.append(f"Path traversal detected in argument '{key}': {val}")
+                if key.lower() in {"cmd", "command"} and any(
+                    p.search(val) for p in self.DANGEROUS_SHELL_PATTERNS
+                ):
+                    violations.append(f"Dangerous command chaining syntax in argument '{key}'")
+            return clean_val
+
+        elif isinstance(val, dict):
+            sanitized_dict = {}
+            for sub_k, sub_v in val.items():
+                sanitized_dict[sub_k] = self._validate_node(
+                    sub_k, sub_v, violations, strict_shell_check, current_depth + 1, max_depth
+                )
+            return sanitized_dict
+
+        elif isinstance(val, list):
+            sanitized_list = []
+            for item in val:
+                sanitized_list.append(
+                    self._validate_node(
+                        key, item, violations, strict_shell_check, current_depth + 1, max_depth
+                    )
+                )
+            return sanitized_list
+
+        return val
+
     def validate_tool_arguments(
         self,
         tool_name: str,
@@ -48,35 +98,14 @@ class StructuredOutputGuard:
         """Validate argument dictionary, detecting prompt injections and dangerous shell payloads."""
         t0 = time.perf_counter()
         violations: List[str] = []
-        is_safe = True
         sanitized_args: Dict[str, Any] = {}
 
         for key, val in arguments.items():
-            if isinstance(val, str):
-                # 1. Scan for prompt injection directives
-                obs = self.guard.process_observation(val)
-                if obs["is_untrusted"]:
-                    violations.append(f"Prompt injection in argument '{key}': {obs['threat_categories']}")
-                    is_safe = False
-                    sanitized_args[key] = obs["clean_text"]
-                else:
-                    sanitized_args[key] = val
+            sanitized_args[key] = self._validate_node(
+                key, val, violations, strict_shell_check, current_depth=0
+            )
 
-                # 2. Check sensitive arguments for dangerous shell escapes or path traversal
-                if strict_shell_check and key.lower() in self.sensitive_arg_keys:
-                    # Detect path traversal
-                    if "../" in val or "..\\" in val or "/etc/" in val:
-                        violations.append(f"Path traversal detected in argument '{key}': {val}")
-                        is_safe = False
-
-                    # Detect command chaining
-                    if key.lower() in {"cmd", "command"} and any(
-                        p.search(val) for p in self.DANGEROUS_SHELL_PATTERNS
-                    ):
-                        violations.append(f"Dangerous command chaining syntax in argument '{key}'")
-                        is_safe = False
-            else:
-                sanitized_args[key] = val
+        is_safe = len(violations) == 0
 
         latency_ms = (time.perf_counter() - t0) * 1000.0
 

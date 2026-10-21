@@ -29,7 +29,8 @@ class Tier1SyntacticSanitizer:
         re.compile(r"(?i)\b(forward|exfiltrate|leak)\s+(all\s+)?(system\s+)?(data|secrets|messages|credentials|tokens|keys)\b"),
         re.compile(r"(?i)\bexecute\s+command\s*:\s*\b"),
         re.compile(r"(?i)\badmin\s+mode\s+enabled\b"),
-        re.compile(r"(?i)\b(exec_bash|drop_table|delete_file|execute_sql|transfer_funds|delete_database|drop_database)\s*(\(|=)"),
+        re.compile(r"(?i)\b(exec_bash|drop_table|delete_file|execute_sql|transfer_funds|delete_database|drop_database|terminate_instance|destroy_cluster)\s*(\(|=)"),
+        re.compile(r"(?i)\b(assistant|ai|system)\s*:\s*(you\s+must|please|now)\s+(now\s+)?(invoke|call|execute|run)\b"),
     ]
 
     DELIMITER_TAGS: ClassVar[list[tuple[str, str]]] = [
@@ -133,7 +134,7 @@ class Tier3ActionFirewall:
     HIGH_STAKES_TOOLS: ClassVar[set[str]] = {
         "send_email", "delete_file", "drop_table", "execute_sql",
         "http_post", "transfer_funds", "modify_permissions", "exec_bash",
-        "delete_database", "drop_database",
+        "delete_database", "drop_database", "terminate_instance", "destroy_cluster",
     }
 
     @staticmethod
@@ -253,7 +254,9 @@ class LightGuardAgent:
         if self.threat_intel and self.threat_intel.total_signatures > 0:
             t_intel_s = time.perf_counter()
             for sig in self.threat_intel._signatures.values():
-                if re.search(sig.pattern, inspection_buffer, re.IGNORECASE):
+                matcher = getattr(sig, "compiled", None)
+                matched = matcher.search(inspection_buffer) if matcher is not None else re.search(sig.pattern, inspection_buffer, re.IGNORECASE)
+                if matched:
                     t1_flagged = True
                     risk_score = max(risk_score, 0.95 if sig.severity == "CRITICAL" else 0.80)
                     break
@@ -350,11 +353,7 @@ class LightGuardAgent:
                 "t3_latency_ms": elapsed_ms,
             }
 
-        # Whitelist override (Bypasses untrusted observation restriction for permitted tools)
-        if proposed_tool in self.policy.whitelisted_tools:
-            return {"allowed": True, "reason": "Whitelisted tool", "t3_latency_ms": 0.001}
-
-        # Step 1: Verify tool arguments against active Canary tokens
+        # Mandatory Security Step 1: Verify tool arguments against active Canary tokens
         if self.policy.enable_canary_guard:
             canary_safe, canary_reason = self.canary.verify_action_arguments(proposed_tool, tool_args)
             if not canary_safe:
@@ -366,6 +365,10 @@ class LightGuardAgent:
                     "reason": canary_reason,
                     "t3_latency_ms": elapsed_ms,
                 }
+
+        # Whitelist override (Bypasses untrusted observation restriction for permitted tools)
+        if proposed_tool in self.policy.whitelisted_tools:
+            return {"allowed": True, "reason": "Whitelisted tool", "t3_latency_ms": 0.001}
 
         # Check custom high-stakes tools from policy
         effective_untrusted = is_untrusted and self.policy.block_on_untrusted

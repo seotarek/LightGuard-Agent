@@ -222,6 +222,25 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_bipia(args: argparse.Namespace) -> int:
+    from lightguard.bipia import run_bipia_benchmark
+    print("=" * 68)
+    print("🔬 Microsoft BIPIA Benchmark (Indirect Prompt Injection Attacks)")
+    print("=" * 68)
+    report = run_bipia_benchmark()
+    print(f"Total Evaluated Samples    : {report.total_samples}")
+    print(f"Adversarial Mitigation Rate: {report.adversarial_mitigation_rate:.1f}%")
+    print(f"Attack Success Rate (ASR)  : {report.attack_success_rate:.1f}%")
+    print(f"Clean Benchmark Accuracy   : {report.clean_accuracy_rate:.1f}%")
+    print(f"False Positive Rate (FPR)  : {report.false_positive_rate:.2f}%")
+    print(f"Mean Latency               : {report.mean_latency_ms:.4f} ms")
+    print("-" * 68)
+    for dom, stats in report.domain_breakdown.items():
+        print(f"[{dom:10s}] Mitigation: {stats['adversarial_mitigation_rate']:5.1f}% | Clean Acc: {stats['clean_accuracy_rate']:5.1f}%")
+    print("=" * 68)
+    return 0
+
+
 def cmd_version(args: argparse.Namespace) -> int:
     from lightguard import __version__
     print(f"LightGuard-Agent v{__version__}")
@@ -275,6 +294,9 @@ def main() -> None:
     # benchmark
     subparsers.add_parser("benchmark", help="Run empirical benchmark suite")
 
+    # bipia
+    subparsers.add_parser("bipia", help="Run Microsoft BIPIA academic indirect injection benchmark")
+
     # version
     subparsers.add_parser("version", help="Show version and DOI information")
 
@@ -291,6 +313,7 @@ def main() -> None:
         "audit": cmd_audit,
         "redteam": cmd_audit,
         "benchmark": cmd_benchmark,
+        "bipia": cmd_bipia,
         "version": cmd_version,
     }
 
