@@ -7,6 +7,7 @@ Author: Tarek Mohamed (seotarek@gmail.com)
 
 from .adversarial_suffix import AdversarialSuffixDetector
 from .async_core import AsyncLightGuardAgent
+from .bipia import BIPIABenchmarkReport, run_bipia_benchmark
 from .canary import CanaryGuard, CanaryViolationError
 from .core import (
     LightGuardAgent,
@@ -27,7 +28,6 @@ from .policy import PolicyProfile, SecurityPolicyConfig
 from .privacy import PrivacyGuard, RedactionResult
 from .rag import RAGContextShield
 from .redteam import run_redteam_audit
-from .bipia import BIPIABenchmarkReport, run_bipia_benchmark
 from .reporting import ComplianceReportGenerator
 from .session import StatefulSessionGuard
 from .structured import StructuredOutputGuard

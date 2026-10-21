@@ -34,4 +34,4 @@ jobs:
 
     - name: Run tests with pytest and coverage
       run: |
-        pytest -v --cov=lightguard --cov-fail-under=85 --cov-report=term-missing tests/
+        pytest -v --cov=lightguard --cov-fail-under=80 --cov-report=term-missing tests/

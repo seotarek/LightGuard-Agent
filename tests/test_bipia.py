@@ -1,6 +1,5 @@
-from lightguard.bipia import run_bipia_benchmark, BIPIABenchmarkReport
+from lightguard.bipia import BIPIABenchmarkReport, run_bipia_benchmark
 from lightguard.core import LightGuardAgent
-from lightguard.policy import SecurityPolicyConfig
 
 
 def test_bipia_benchmark_execution():
