@@ -21,7 +21,7 @@
   <a href="https://seotarek.github.io/LightGuard-Agent/"><b>📚 Documentation</b></a> •
   <a href="https://huggingface.co/spaces/seotarek/LightGuard-Agent"><b>🤗 Live Playground</b></a> •
   <a href="https://doi.org/10.5281/zenodo.22731104"><b>📄 Research Paper</b></a> •
-  <a href="https://github.com/seotarek/LightGuard-Agent/releases/tag/v0.7.0"><b>🚀 Release v0.7.0</b></a>
+  <a href="https://github.com/seotarek/LightGuard-Agent/releases/tag/v0.7.1"><b>🚀 Release v0.7.1</b></a>
 </p>
 
 

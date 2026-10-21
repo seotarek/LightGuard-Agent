@@ -43,7 +43,7 @@ from .telemetry import SecurityTelemetryCollector
 from .threat_intel import ThreatIntelRegistry, ThreatSignature
 from .wrapper import wrap, wrap_client
 
-__version__ = "0.7.0"
+__version__ = "0.7.1"
 __all__ = [
     "LightGuardAgent",
     "run_bipia_benchmark",
