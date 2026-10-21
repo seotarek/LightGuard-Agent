@@ -30,6 +30,29 @@ class RedTeamAuditReport:
     category_breakdown: list[AuditCategoryStats]
     details: list[dict[str, Any]]
 
+    def __getitem__(self, item: str) -> Any:
+        aliases = {
+            "mitigated": self.passed_vectors,
+            "defense_rate_pct": (
+                self.adversarial_mitigation_rate
+                if self.adversarial_mitigation_rate > 1.0
+                else self.adversarial_mitigation_rate * 100.0
+            ),
+            "false_positive_rate_pct": (
+                self.false_positive_rate
+                if self.false_positive_rate > 1.0
+                else self.false_positive_rate * 100.0
+            ),
+        }
+        if item in aliases:
+            return aliases[item]
+        if hasattr(self, item):
+            return getattr(self, item)
+        raise KeyError(item)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dataclasses.asdict(self)
+
 
 def run_redteam_audit(
     guard: Optional[LightGuardAgent] = None,

@@ -35,9 +35,11 @@ class ComplianceReportGenerator:
             else audit_res.false_positive_rate * 100.0
         )
 
+        from lightguard import __version__
+
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "version": "0.5.0",
+            "version": __version__,
             "overall_status": "COMPLIANT",
             "defense_rate": f"{defense_rate_pct:.1f}%",
             "false_positive_rate": f"{fpr_pct:.1f}%",

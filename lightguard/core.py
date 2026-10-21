@@ -186,12 +186,19 @@ class LightGuardAgent:
         self.enable_telemetry = enable_telemetry
         self.telemetry = SecurityTelemetryCollector.get_instance() if enable_telemetry else None
 
-    def process_observation(self, raw_observation: str) -> dict[str, Any]:
+    def process_observation(self, raw_observation: Any) -> dict[str, Any]:
+        if raw_observation is None:
+            raw_text = ""
+        elif not isinstance(raw_observation, str):
+            raw_text = str(raw_observation)
+        else:
+            raw_text = raw_observation
+
         # Optional DLP / PII redaction
-        dlp_redacted = raw_observation
+        dlp_redacted = raw_text
         dlp_mapping: dict[str, str] = {}
         if self.policy.enable_dlp_redaction:
-            dlp_redacted, dlp_mapping, _ = PrivacyGuard.redact(raw_observation)
+            dlp_redacted, dlp_mapping, _ = PrivacyGuard.redact(raw_text)
             if self.enable_telemetry and self.telemetry and dlp_mapping:
                 self.telemetry.record_pii_redaction(len(dlp_mapping))
 
