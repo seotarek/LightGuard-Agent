@@ -2,8 +2,27 @@ import functools
 import inspect
 from typing import Any, Callable, Iterator, Optional, Union
 
+import json
 from lightguard.core import LightGuardAgent
 from lightguard.decorators import SecurityViolationError
+
+
+def _unmarshal_tool_args(raw_args: Any) -> dict[str, Any]:
+    """Safely parse tool arguments from JSON string, dict, or arbitrary object."""
+    if isinstance(raw_args, dict):
+        return raw_args
+    if isinstance(raw_args, str):
+        trimmed = raw_args.strip()
+        if not trimmed:
+            return {}
+        try:
+            parsed = json.loads(trimmed)
+            if isinstance(parsed, dict):
+                return parsed
+            return {"args": parsed}
+        except (json.JSONDecodeError, ValueError):
+            return {"raw_args": raw_args}
+    return {"args": raw_args}
 
 
 class LightGuardStreamWrapper:
@@ -88,9 +107,10 @@ class LightGuardStreamWrapper:
 
             fn_name = self._tool_calls_accumulator[idx]["name"]
             if fn_name:
+                parsed_args = _unmarshal_tool_args(self._tool_calls_accumulator[idx]["arguments"])
                 act_res = self._guard.verify_action(
                     fn_name,
-                    {"args": self._tool_calls_accumulator[idx]["arguments"]},
+                    parsed_args,
                     is_untrusted=self._is_untrusted,
                 )
                 if not act_res["allowed"] and self._block:
@@ -145,9 +165,10 @@ class LightGuardStreamWrapper:
             tc_data = self._tool_calls_accumulator[idx]
             fn_name = tc_data.get("name", "")
             if fn_name:
+                parsed_args = _unmarshal_tool_args(tc_data.get("arguments", ""))
                 act_res = self._guard.verify_action(
                     fn_name,
-                    {"args": tc_data.get("arguments", "")},
+                    parsed_args,
                     is_untrusted=self._is_untrusted,
                 )
                 if not act_res["allowed"] and self._block:
@@ -210,9 +231,10 @@ class LightGuardAsyncStreamWrapper:
                 for idx, tc_data in list(self._tool_calls_accumulator.items()):
                     fn_name = tc_data.get("name", "")
                     if fn_name:
+                        parsed_args = _unmarshal_tool_args(tc_data.get("arguments", ""))
                         act_res = self._guard.verify_action(
                             fn_name,
-                            {"args": tc_data.get("arguments", "")},
+                            parsed_args,
                             is_untrusted=self._is_untrusted,
                         )
                         if not act_res["allowed"] and self._block:
@@ -247,9 +269,10 @@ class LightGuardAsyncStreamWrapper:
                 tc_data = self._tool_calls_accumulator[idx]
                 fn_name = tc_data.get("name", "")
                 if fn_name:
+                    parsed_args = _unmarshal_tool_args(tc_data.get("arguments", ""))
                     act_res = self._guard.verify_action(
                         fn_name,
-                        {"args": tc_data.get("arguments", "")},
+                        parsed_args,
                         is_untrusted=self._is_untrusted,
                     )
                     if not act_res["allowed"] and self._block:
@@ -288,9 +311,10 @@ class LightGuardChatCompletionsProxy:
                         func = getattr(tc, "function", None)
                         if func:
                             fn_name = getattr(func, "name", "")
-                            fn_args = getattr(func, "arguments", "{}")
+                            raw_args = getattr(func, "arguments", "{}")
+                            fn_args = _unmarshal_tool_args(raw_args)
                             act_res = self._guard.verify_action(
-                                fn_name, {"args": fn_args}, is_untrusted=session_untrusted
+                                fn_name, fn_args, is_untrusted=session_untrusted
                             )
                             if not act_res["allowed"] and self._block:
                                 raise SecurityViolationError(
@@ -528,7 +552,7 @@ class LightGuardChatProxy:
                     fn_args = fn.get("arguments", {})
                     act_res = self._guard.verify_action(
                         fn_name,
-                        fn_args if isinstance(fn_args, dict) else {"args": fn_args},
+                        _unmarshal_tool_args(fn_args),
                         is_untrusted=session_untrusted,
                     )
                     if not act_res["allowed"] and self._block:
