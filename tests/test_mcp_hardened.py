@@ -1,10 +1,10 @@
 """Tests for Hardened MCP Gateway, Capability Discovery Filtering, and Size Bounds."""
 
 import json
-import pytest
+
 from lightguard.core import LightGuardAgent
 from lightguard.mcp_gateway import MCPSecurityGateway
-from lightguard.policy import PolicyProfile, SecurityPolicyConfig, ToolMetadata, ToolPolicyRegistry
+from lightguard.policy import SecurityPolicyConfig, ToolMetadata, ToolPolicyRegistry
 
 
 def test_mcp_message_size_limit():

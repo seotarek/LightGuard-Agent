@@ -1,10 +1,7 @@
 """Tests for Advanced RAG Context & Metadata Security."""
 
-import pytest
-from lightguard.core import LightGuardAgent
 from lightguard.rag import (
     RAGContextShield,
-    SanitizedChunk,
     SourceTrustLevel,
 )
 

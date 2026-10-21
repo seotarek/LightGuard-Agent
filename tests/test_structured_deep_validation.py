@@ -1,7 +1,5 @@
 """Tests for Deep Recursive Structured Argument & SSRF/Path Traversal Guard."""
 
-import pytest
-from lightguard.core import LightGuardAgent
 from lightguard.structured import StructuredOutputGuard
 
 

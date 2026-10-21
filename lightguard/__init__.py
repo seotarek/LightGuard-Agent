@@ -7,6 +7,7 @@ Author: Tarek Mohamed (seotarek@gmail.com)
 
 from .adversarial_suffix import AdversarialSuffixDetector
 from .async_core import AsyncLightGuardAgent
+from .audit import AuditEvent, AuditLogger, SecurityReasonCode
 from .bipia import BIPIABenchmarkReport, run_bipia_benchmark
 from .canary import CanaryGuard, CanaryViolationError
 from .core import (
@@ -24,9 +25,16 @@ from .mcp import LightGuardMCPProxy
 from .mcp_gateway import MCPGateway, MCPSecurityGateway
 from .multimodal import MultimodalShield
 from .obfuscation import Tier0ObfuscationShield
-from .policy import PolicyProfile, SecurityPolicyConfig
+from .policy import (
+    AuthorizationContext,
+    PolicyProfile,
+    SecurityPolicyConfig,
+    ToolCapability,
+    ToolMetadata,
+    ToolPolicyRegistry,
+)
 from .privacy import PrivacyGuard, RedactionResult
-from .rag import RAGContextShield
+from .rag import RAGContextShield, SourceTrustLevel
 from .redteam import run_redteam_audit
 from .reporting import ComplianceReportGenerator
 from .session import StatefulSessionGuard
@@ -35,7 +43,7 @@ from .telemetry import SecurityTelemetryCollector
 from .threat_intel import ThreatIntelRegistry, ThreatSignature
 from .wrapper import wrap, wrap_client
 
-__version__ = "0.6.3"
+__version__ = "0.7.0"
 __all__ = [
     "LightGuardAgent",
     "run_bipia_benchmark",
@@ -55,8 +63,16 @@ __all__ = [
     "PrivacyGuard",
     "RedactionResult",
     "RAGContextShield",
+    "SourceTrustLevel",
     "SecurityPolicyConfig",
     "PolicyProfile",
+    "ToolCapability",
+    "ToolMetadata",
+    "ToolPolicyRegistry",
+    "AuthorizationContext",
+    "AuditEvent",
+    "AuditLogger",
+    "SecurityReasonCode",
     "SecurityTelemetryCollector",
     "MultiAgentSwarmShield",
     "AgentTaintTracker",
@@ -75,3 +91,4 @@ __all__ = [
     "run_redteam_audit",
     "run_dashboard",
 ]
+

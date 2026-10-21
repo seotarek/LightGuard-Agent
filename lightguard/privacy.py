@@ -81,6 +81,10 @@ class PrivacyGuard:
     # Secret / Credential patterns
     PATTERNS_SECRETS: ClassVar[dict[str, re.Pattern]] = {
         "OPENAI_KEY": re.compile(r"\bsk-[A-Za-z0-9_-]{32,}\b"),
+        "ANTHROPIC_KEY": re.compile(r"\bsk-ant-api03-[A-Za-z0-9_-]{30,}\b"),
+        "GOOGLE_API_KEY": re.compile(r"\bAIza[A-Za-z0-9_-]{35,40}\b"),
+        "HUGGINGFACE_TOKEN": re.compile(r"\bhf_[A-Za-z0-9]{30,}\b"),
+        "STRIPE_KEY": re.compile(r"\b(?:sk|rk)_(?:live|test)_[0-9a-zA-Z]{20,}\b"),
         "AWS_KEY_ID": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
         "GITHUB_TOKEN": re.compile(r"\b(?:ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{50,})\b"),
         "SLACK_TOKEN": re.compile(r"\bxoxb-[0-9]{10,}-[0-9]{10,}-[A-Za-z0-9]{20,}\b"),
@@ -165,7 +169,12 @@ class PrivacyGuard:
         return results
 
     @classmethod
-    def redact(cls, text: str, reversible: bool = True) -> RedactionResult:
+    def redact(
+        cls,
+        text: str,
+        reversible: bool = True,
+        counter_start: int = 1,
+    ) -> RedactionResult:
         """
         Redacts all credentials and PII.
         If reversible=True, provides a token substitution mapping to restore the data later.
@@ -191,7 +200,7 @@ class PrivacyGuard:
 
         mapping: dict[str, str] = {}
         cleaned = text
-        token_counter = 0
+        token_counter = counter_start - 1
 
         for item in sorted_detections:
             token_counter += 1
@@ -214,3 +223,42 @@ class PrivacyGuard:
         for placeholder, original in mapping.items():
             restored = restored.replace(placeholder, original)
         return restored
+
+    @classmethod
+    def redact_structured(
+        cls, data: Any, reversible: bool = True
+    ) -> tuple[Any, dict[str, str], float]:
+        """Recursively scans and redacts PII/secrets inside nested dictionaries, lists, and strings."""
+        start_t = time.perf_counter()
+        combined_mapping: dict[str, str] = {}
+        current_counter = [1]
+
+        def _walk(node: Any) -> Any:
+            if isinstance(node, str):
+                res = cls.redact(node, reversible=reversible, counter_start=current_counter[0])
+                current_counter[0] += len(res.entity_map)
+                combined_mapping.update(res.entity_map)
+                return res.redacted_text
+            elif isinstance(node, dict):
+                return {k: _walk(v) for k, v in node.items()}
+            elif isinstance(node, list):
+                return [_walk(item) for item in node]
+            return node
+
+        redacted_data = _walk(data)
+        elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+        return redacted_data, combined_mapping, elapsed_ms
+
+    @classmethod
+    def restore_structured(cls, data: Any, mapping: dict[str, str]) -> Any:
+        """Recursively restores redacted placeholders in nested structures back to original values."""
+        def _walk(node: Any) -> Any:
+            if isinstance(node, str):
+                return cls.restore(node, mapping)
+            elif isinstance(node, dict):
+                return {k: _walk(v) for k, v in node.items()}
+            elif isinstance(node, list):
+                return [_walk(item) for item in node]
+            return node
+
+        return _walk(data)

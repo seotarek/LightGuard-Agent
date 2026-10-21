@@ -7,8 +7,10 @@ and blocking unauthorized high-stakes actions in real time (< 0.2ms).
 
 import json
 import sys
-from typing import Optional, Tuple
+import time
+from typing import Any, Optional, Tuple, Union
 
+from lightguard.audit import AuditEvent, SecurityReasonCode
 from lightguard.core import LightGuardAgent
 from lightguard.mcp import LightGuardMCPProxy
 
@@ -20,10 +22,21 @@ class MCPSecurityGateway:
         self,
         guard: Optional[LightGuardAgent] = None,
         max_message_size: int = 10 * 1024 * 1024,
+        audit_logger: Optional[Any] = None,
     ):
         self.guard = guard if guard is not None else LightGuardAgent()
         self.proxy = LightGuardMCPProxy(guard=self.guard)
         self.max_message_size = max_message_size
+        self.audit_logger = audit_logger or getattr(self.guard, "audit_logger", None)
+
+    def handle_message(self, message: Union[str, dict[str, Any]]) -> dict[str, Any]:
+        """Convenience method for directly processing in-memory JSON-RPC messages."""
+        raw_str = json.dumps(message) if isinstance(message, dict) else str(message)
+        allowed, out_str = self.process_client_to_server(raw_str)
+        try:
+            return json.loads(out_str)
+        except Exception:
+            return {"raw": out_str, "allowed": allowed}
 
     def process_client_to_server(self, raw_message: str) -> Tuple[bool, str]:
         """Inspect client requests before sending to the MCP server.
@@ -31,6 +44,17 @@ class MCPSecurityGateway:
         Returns (allowed, forwarded_or_error_message).
         """
         if len(raw_message.encode("utf-8")) > self.max_message_size:
+            if self.audit_logger:
+                self.audit_logger.log(
+                    AuditEvent(
+                        event_id=f"mcp-{time.time_ns()}",
+                        timestamp=time.time(),
+                        event_type="mcp_request",
+                        decision="BLOCK",
+                        reason_code=SecurityReasonCode.LG_MCP_MSG_SIZE,
+                        reason=f"Message size ({len(raw_message.encode('utf-8'))} bytes) exceeds limit ({self.max_message_size} bytes)",
+                    )
+                )
             err_resp = {
                 "jsonrpc": "2.0",
                 "id": None,
@@ -40,6 +64,7 @@ class MCPSecurityGateway:
                 },
             }
             return False, json.dumps(err_resp)
+
 
         try:
             req = json.loads(raw_message)

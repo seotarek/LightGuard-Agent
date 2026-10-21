@@ -1,7 +1,7 @@
 import dataclasses
 import enum
 import json
-from typing import Any
+from typing import Any, Optional
 
 
 class PolicyProfile(str, enum.Enum):
@@ -54,6 +54,8 @@ class ToolPolicyRegistry:
 
     def register_tool(self, metadata: ToolMetadata) -> None:
         self._tools[metadata.name] = metadata
+
+    register = register_tool
 
     def get_tool(self, name: str) -> Optional[ToolMetadata]:
         return self._tools.get(name)
@@ -110,6 +112,7 @@ class SecurityPolicyConfig:
     approval_hook: Optional[Any] = None  # Callable[[str, dict, AuthorizationContext], bool]
     resource_roots: list[str] = dataclasses.field(default_factory=list)
     allowed_url_schemes: list[str] = dataclasses.field(default_factory=lambda: ["http", "https"])
+    audit_logger: Optional[Any] = None
 
     @classmethod
     def strict(cls) -> "SecurityPolicyConfig":

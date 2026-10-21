@@ -104,7 +104,7 @@ class CanaryGuard:
             arg_str = str(arg_val)
             is_leaked, token = self.check_leakage(arg_str)
             if is_leaked:
-                return False, f"Canary Guard Blocked: Exfiltration detected in tool '{tool_name}' argument '{arg_key}' (Token: {token})"
+                return False, f"Canary Guard Blocked: Exfiltration detected in tool '{tool_name}' argument '{arg_key}'"
         return True, "Safe"
 
     def verify_boundary_integrity(self, text: str, nonce: str) -> tuple[bool, str]:

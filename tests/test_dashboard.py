@@ -1,4 +1,3 @@
-import os
 import threading
 import urllib.request
 from http.server import HTTPServer

@@ -1,6 +1,5 @@
 """Tests for Advanced Centralized Policy & Tool Authorization Engine."""
 
-import pytest
 from lightguard.core import LightGuardAgent
 from lightguard.policy import (
     AuthorizationContext,

@@ -1,8 +1,8 @@
 import functools
 import inspect
+import json
 from typing import Any, Callable, Iterator, Optional, Union
 
-import json
 from lightguard.core import LightGuardAgent
 from lightguard.decorators import SecurityViolationError
 
