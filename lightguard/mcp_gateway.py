@@ -50,17 +50,70 @@ class MCPSecurityGateway:
             }
             return False, json.dumps(err_resp)
 
-        method = req.get("method", "")
         req_id = req.get("id")
+
+        if req.get("jsonrpc") != "2.0":
+            err_resp = {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {
+                    "code": -32600,
+                    "message": "Invalid Request: JSON-RPC 'jsonrpc' field must be exactly '2.0'",
+                },
+            }
+            return False, json.dumps(err_resp)
+
+        method = req.get("method")
+        if not isinstance(method, str) or not method.strip():
+            err_resp = {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {
+                    "code": -32600,
+                    "message": "Invalid Request: 'method' must be a non-empty string",
+                },
+            }
+            return False, json.dumps(err_resp)
 
         if method == "tools/call":
             params = req.get("params")
             if not isinstance(params, dict):
-                params = {}
-            tool_name = params.get("name", "")
+                err_resp = {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {
+                        "code": -32602,
+                        "message": "Invalid params: 'params' must be a JSON object for tools/call",
+                    },
+                }
+                return False, json.dumps(err_resp)
+
+            tool_name = params.get("name")
+            if not isinstance(tool_name, str) or not tool_name.strip():
+                err_resp = {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {
+                        "code": -32602,
+                        "message": "Invalid params: 'params.name' must be a non-empty string tool name",
+                    },
+                }
+                return False, json.dumps(err_resp)
+
+            tool_name = tool_name.strip()
             tool_args = params.get("arguments")
-            if not isinstance(tool_args, dict):
+            if tool_args is None:
                 tool_args = {}
+            elif not isinstance(tool_args, dict):
+                err_resp = {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {
+                        "code": -32602,
+                        "message": "Invalid params: 'params.arguments' must be a JSON object",
+                    },
+                }
+                return False, json.dumps(err_resp)
 
             validation = self.proxy.intercept_request(
                 tool_name=tool_name,
@@ -224,6 +277,9 @@ def run_stdio_gateway(upstream_cmd: list[str]) -> None:
     t_out.start()
 
     proc.wait()
+
+
+MCPGateway = MCPSecurityGateway
 
 
 if __name__ == "__main__":

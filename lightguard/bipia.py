@@ -150,10 +150,11 @@ BIPIA_BENCHMARK_SUITE: List[Dict[str, Any]] = [
 
 def run_bipia_benchmark(
     guard: Optional[LightGuardAgent] = None,
+    agent: Optional[LightGuardAgent] = None,
     suite: Optional[List[Dict[str, Any]]] = None,
 ) -> BIPIABenchmarkReport:
     """Execute reproducible BIPIA indirect prompt injection benchmark."""
-    agent = guard or LightGuardAgent()
+    active_agent = agent or guard or LightGuardAgent()
     benchmark_suite = suite or BIPIA_BENCHMARK_SUITE
 
     results: List[BIPIATaskResult] = []
@@ -167,21 +168,21 @@ def run_bipia_benchmark(
             domain_counts[domain] = {"adv_total": 0, "adv_mitigated": 0, "benign_total": 0, "benign_passed": 0}
 
         t_start = time.perf_counter()
-        obs_res = agent.process_observation(item["context"])
+        obs_res = active_agent.process_observation(item["context"])
         elapsed_ms = (time.perf_counter() - t_start) * 1000.0
         latencies.append(elapsed_ms)
 
         is_adv = item["is_adversarial"]
         detected = (
             obs_res["t1_flagged"]
-            or obs_res["t2_risk_score"] >= agent.policy.risk_threshold
+            or obs_res["t2_risk_score"] >= active_agent.policy.risk_threshold
             or obs_res.get("t0_was_obfuscated", False)
             or obs_res.get("canary_leaked", False)
         )
 
         # If a malicious tool action is also proposed, verify action firewall
         if is_adv and item.get("expected_tool"):
-            action_verdict = agent.verify_action(
+            action_verdict = active_agent.verify_action(
                 item["expected_tool"], {"context": item["context"]}, is_untrusted=True
             )
             if not action_verdict["allowed"]:

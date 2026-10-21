@@ -156,8 +156,112 @@ class LightGuardStreamWrapper:
                     )
 
 
+class LightGuardAsyncStreamWrapper:
+    """Wraps an asynchronous LLM chunk stream, enforcing real-time inspection on streaming tokens and tool calls."""
+
+    def __init__(
+        self,
+        async_stream: Any,
+        guard: LightGuardAgent,
+        block_on_violation: bool = True,
+        is_untrusted: bool = False,
+    ):
+        self._stream = async_stream
+        self._guard = guard
+        self._block = block_on_violation
+        self._is_untrusted = is_untrusted
+        self._tool_calls_accumulator: dict[int, dict[str, str]] = {}
+
+    def __aiter__(self) -> Any:
+        self._async_iter = self._stream.__aiter__()
+        return self
+
+    async def __anext__(self) -> Any:
+        chunk = await self._async_iter.__anext__()
+
+        # 1. Standard OpenAI streaming chunk format
+        choices = getattr(chunk, "choices", None)
+        if choices and len(choices) > 0:
+            choice = choices[0]
+            delta = getattr(choice, "delta", None)
+            if delta:
+                content = getattr(delta, "content", None)
+                if content:
+                    is_leaked, token = self._guard.canary.check_leakage(content)
+                    if is_leaked and self._block:
+                        raise SecurityViolationError(
+                            f"LightGuard Security Block in async stream: Output leaked confidential canary token ({token})."
+                        )
+                tool_calls = getattr(delta, "tool_calls", None)
+                if tool_calls:
+                    for tc in tool_calls:
+                        idx = getattr(tc, "index", 0)
+                        if idx not in self._tool_calls_accumulator:
+                            self._tool_calls_accumulator[idx] = {"name": "", "arguments": ""}
+                        func = getattr(tc, "function", None)
+                        if func:
+                            if getattr(func, "name", None):
+                                self._tool_calls_accumulator[idx]["name"] = func.name
+                            if getattr(func, "arguments", None):
+                                self._tool_calls_accumulator[idx]["arguments"] += func.arguments
+
+            finish_reason = getattr(choice, "finish_reason", None)
+            if finish_reason in ("tool_calls", "function_call", "stop") and self._tool_calls_accumulator:
+                for idx, tc_data in list(self._tool_calls_accumulator.items()):
+                    fn_name = tc_data.get("name", "")
+                    if fn_name:
+                        act_res = self._guard.verify_action(
+                            fn_name,
+                            {"args": tc_data.get("arguments", "")},
+                            is_untrusted=self._is_untrusted,
+                        )
+                        if not act_res["allowed"] and self._block:
+                            raise SecurityViolationError(
+                                f"LightGuard Action Firewall Block in async stream: {act_res['reason']}"
+                            )
+                self._tool_calls_accumulator.clear()
+
+        # 2. Anthropic streaming chunk format
+        c_type = getattr(chunk, "type", None)
+        if c_type == "content_block_delta":
+            c_delta = getattr(chunk, "delta", None)
+            if c_delta:
+                d_type = getattr(c_delta, "type", None)
+                if d_type == "text_delta":
+                    text_val = getattr(c_delta, "text", "")
+                    if text_val:
+                        is_leaked, token = self._guard.canary.check_leakage(text_val)
+                        if is_leaked and self._block:
+                            raise SecurityViolationError(
+                                f"LightGuard Security Block in async Anthropic stream: Output leaked confidential canary token ({token})."
+                            )
+                elif d_type == "input_json_delta":
+                    idx = getattr(chunk, "index", 0)
+                    if idx not in self._tool_calls_accumulator:
+                        self._tool_calls_accumulator[idx] = {"name": "", "arguments": ""}
+                    self._tool_calls_accumulator[idx]["arguments"] += getattr(c_delta, "partial_json", "")
+
+        elif c_type == "content_block_stop":
+            idx = getattr(chunk, "index", 0)
+            if idx in self._tool_calls_accumulator:
+                tc_data = self._tool_calls_accumulator[idx]
+                fn_name = tc_data.get("name", "")
+                if fn_name:
+                    act_res = self._guard.verify_action(
+                        fn_name,
+                        {"args": tc_data.get("arguments", "")},
+                        is_untrusted=self._is_untrusted,
+                    )
+                    if not act_res["allowed"] and self._block:
+                        raise SecurityViolationError(
+                            f"LightGuard Action Firewall Block in async Anthropic stream: {act_res['reason']}"
+                        )
+
+        return chunk
+
+
 class LightGuardChatCompletionsProxy:
-    """Proxies client.chat.completions to transparently intercept .create() calls."""
+    """Proxies client.chat.completions to transparently intercept .create() calls for both sync and async clients."""
 
     def __init__(self, real_completions: Any, guard: LightGuardAgent, block_on_violation: bool = True):
         self._real = real_completions
@@ -166,6 +270,39 @@ class LightGuardChatCompletionsProxy:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._real, name)
+
+    def _inspect_result(self, result: Any, session_untrusted: bool) -> None:
+        try:
+            if hasattr(result, "choices") and result.choices:
+                msg = result.choices[0].message
+                content = getattr(msg, "content", "") or ""
+                if content:
+                    is_leaked, token = self._guard.canary.check_leakage(content)
+                    if is_leaked and self._block:
+                        raise SecurityViolationError(
+                            f"LightGuard Security Block: Output leaked confidential canary token ({token})."
+                        )
+                tool_calls = getattr(msg, "tool_calls", None)
+                if tool_calls:
+                    for tc in tool_calls:
+                        func = getattr(tc, "function", None)
+                        if func:
+                            fn_name = getattr(func, "name", "")
+                            fn_args = getattr(func, "arguments", "{}")
+                            act_res = self._guard.verify_action(
+                                fn_name, {"args": fn_args}, is_untrusted=session_untrusted
+                            )
+                            if not act_res["allowed"] and self._block:
+                                raise SecurityViolationError(
+                                    f"LightGuard Action Firewall Block: {act_res['reason']}"
+                                )
+        except SecurityViolationError:
+            raise
+        except Exception as e:
+            if self._block:
+                raise SecurityViolationError(
+                    f"LightGuard Security Block: Verification failed-closed on OpenAI completion: {e}"
+                )
 
     def create(self, *args: Any, **kwargs: Any) -> Any:
         session_untrusted = False
@@ -200,44 +337,27 @@ class LightGuardChatCompletionsProxy:
 
         result = self._real.create(*args, **kwargs)
 
+        if inspect.iscoroutine(result):
+            async def _async_create():
+                resolved = await result
+                if kwargs.get("stream", False):
+                    return LightGuardAsyncStreamWrapper(
+                        resolved, self._guard, self._block, is_untrusted=session_untrusted
+                    )
+                self._inspect_result(resolved, session_untrusted)
+                return resolved
+
+            return _async_create()
+
         if kwargs.get("stream", False):
             return LightGuardStreamWrapper(result, self._guard, self._block, is_untrusted=session_untrusted)
 
-        try:
-            if hasattr(result, "choices") and result.choices:
-                msg = result.choices[0].message
-                content = getattr(msg, "content", "") or ""
-                if content:
-                    is_leaked, token = self._guard.canary.check_leakage(content)
-                    if is_leaked and self._block:
-                        raise SecurityViolationError(
-                            f"LightGuard Security Block: Output leaked confidential canary token ({token})."
-                        )
-                tool_calls = getattr(msg, "tool_calls", None)
-                if tool_calls:
-                    for tc in tool_calls:
-                        func = getattr(tc, "function", None)
-                        if func:
-                            fn_name = getattr(func, "name", "")
-                            fn_args = getattr(func, "arguments", "{}")
-                            act_res = self._guard.verify_action(fn_name, {"args": fn_args}, is_untrusted=session_untrusted)
-                            if not act_res["allowed"] and self._block:
-                                raise SecurityViolationError(
-                                    f"LightGuard Action Firewall Block: {act_res['reason']}"
-                                )
-        except SecurityViolationError:
-            raise
-        except Exception as e:
-            if self._block:
-                raise SecurityViolationError(
-                    f"LightGuard Security Block: Verification failed-closed on OpenAI completion: {e}"
-                )
-
+        self._inspect_result(result, session_untrusted)
         return result
 
 
 class LightGuardMessagesProxy:
-    """Proxies Anthropic client.messages to transparently intercept .create() calls."""
+    """Proxies Anthropic client.messages to transparently intercept .create() calls for sync and async clients."""
 
     def __init__(self, real_messages: Any, guard: LightGuardAgent, block_on_violation: bool = True):
         self._real = real_messages
@@ -246,6 +366,40 @@ class LightGuardMessagesProxy:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._real, name)
+
+    def _inspect_result(self, result: Any, session_untrusted: bool) -> None:
+        try:
+            content_blocks = getattr(result, "content", None)
+            if content_blocks and isinstance(content_blocks, list):
+                for block in content_blocks:
+                    b_type = getattr(block, "type", "") if hasattr(block, "type") else block.get("type", "")
+                    if b_type == "text":
+                        text_val = getattr(block, "text", "") if hasattr(block, "text") else block.get("text", "")
+                        if text_val:
+                            is_leaked, token = self._guard.canary.check_leakage(text_val)
+                            if is_leaked and self._block:
+                                raise SecurityViolationError(
+                                    f"LightGuard Security Block: Output leaked confidential canary token ({token})."
+                                )
+                    elif b_type == "tool_use":
+                        fn_name = getattr(block, "name", "") if hasattr(block, "name") else block.get("name", "")
+                        fn_args = getattr(block, "input", {}) if hasattr(block, "input") else block.get("input", {})
+                        act_res = self._guard.verify_action(
+                            fn_name,
+                            fn_args if isinstance(fn_args, dict) else {"input": fn_args},
+                            is_untrusted=session_untrusted,
+                        )
+                        if not act_res["allowed"] and self._block:
+                            raise SecurityViolationError(
+                                f"LightGuard Action Firewall Block: {act_res['reason']}"
+                            )
+        except SecurityViolationError:
+            raise
+        except Exception as e:
+            if self._block:
+                raise SecurityViolationError(
+                    f"LightGuard Security Block: Verification failed-closed on Anthropic completion: {e}"
+                )
 
     def create(self, *args: Any, **kwargs: Any) -> Any:
         session_untrusted = False
@@ -291,47 +445,27 @@ class LightGuardMessagesProxy:
 
         result = self._real.create(*args, **kwargs)
 
+        if inspect.iscoroutine(result):
+            async def _async_create():
+                resolved = await result
+                if kwargs.get("stream", False):
+                    return LightGuardAsyncStreamWrapper(
+                        resolved, self._guard, self._block, is_untrusted=session_untrusted
+                    )
+                self._inspect_result(resolved, session_untrusted)
+                return resolved
+
+            return _async_create()
+
         if kwargs.get("stream", False):
             return LightGuardStreamWrapper(result, self._guard, self._block, is_untrusted=session_untrusted)
 
-        try:
-            content_blocks = getattr(result, "content", None)
-            if content_blocks and isinstance(content_blocks, list):
-                for block in content_blocks:
-                    b_type = getattr(block, "type", "") if hasattr(block, "type") else block.get("type", "")
-                    if b_type == "text":
-                        text_val = getattr(block, "text", "") if hasattr(block, "text") else block.get("text", "")
-                        if text_val:
-                            is_leaked, token = self._guard.canary.check_leakage(text_val)
-                            if is_leaked and self._block:
-                                raise SecurityViolationError(
-                                    f"LightGuard Security Block: Output leaked confidential canary token ({token})."
-                                )
-                    elif b_type == "tool_use":
-                        fn_name = getattr(block, "name", "") if hasattr(block, "name") else block.get("name", "")
-                        fn_args = getattr(block, "input", {}) if hasattr(block, "input") else block.get("input", {})
-                        act_res = self._guard.verify_action(
-                            fn_name,
-                            fn_args if isinstance(fn_args, dict) else {"input": fn_args},
-                            is_untrusted=session_untrusted,
-                        )
-                        if not act_res["allowed"] and self._block:
-                            raise SecurityViolationError(
-                                f"LightGuard Action Firewall Block: {act_res['reason']}"
-                            )
-        except SecurityViolationError:
-            raise
-        except Exception as e:
-            if self._block:
-                raise SecurityViolationError(
-                    f"LightGuard Security Block: Verification failed-closed on Anthropic completion: {e}"
-                )
-
+        self._inspect_result(result, session_untrusted)
         return result
 
 
 class LightGuardChatProxy:
-    """Proxies client.chat to intercept client.chat.completions."""
+    """Proxies client.chat to intercept client.chat.completions or callable client.chat(model=..., messages=...)."""
 
     def __init__(self, real_chat: Any, guard: LightGuardAgent, block_on_violation: bool = True):
         self._real = real_chat
@@ -343,6 +477,64 @@ class LightGuardChatProxy:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._real, name)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """Enables direct function invocation: client.chat(...) for Ollama and similar engines."""
+        session_untrusted = False
+        messages = kwargs.get("messages", [])
+        if messages and isinstance(messages, list):
+            for i, msg in enumerate(messages):
+                if isinstance(msg, dict):
+                    content = msg.get("content")
+                    if isinstance(content, str):
+                        obs_res = self._guard.process_observation(content)
+                        if obs_res["is_untrusted"]:
+                            session_untrusted = True
+                            if self._block:
+                                raise SecurityViolationError(
+                                    f"LightGuard Security Violation: Untrusted prompt injection in chat call message #{i}: "
+                                    f"{obs_res.get('reason', 'Adversarial pattern identified')}."
+                                )
+                        msg["content"] = obs_res["sanitized_observation"]
+
+        result = self._real(*args, **kwargs)
+
+        if inspect.iscoroutine(result):
+            async def _async_call():
+                resolved = await result
+                self._inspect_call_result(resolved, session_untrusted)
+                return resolved
+
+            return _async_call()
+
+        self._inspect_call_result(result, session_untrusted)
+        return result
+
+    def _inspect_call_result(self, result: Any, session_untrusted: bool) -> None:
+        if isinstance(result, dict):
+            msg = result.get("message", {})
+            content = msg.get("content", "") if isinstance(msg, dict) else ""
+            if content:
+                is_leaked, token = self._guard.canary.check_leakage(content)
+                if is_leaked and self._block:
+                    raise SecurityViolationError(
+                        f"LightGuard Security Block: Output leaked confidential canary token ({token})."
+                    )
+            tool_calls = msg.get("tool_calls", []) if isinstance(msg, dict) else []
+            if tool_calls and isinstance(tool_calls, list):
+                for tc in tool_calls:
+                    fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+                    fn_name = fn.get("name", "")
+                    fn_args = fn.get("arguments", {})
+                    act_res = self._guard.verify_action(
+                        fn_name,
+                        fn_args if isinstance(fn_args, dict) else {"args": fn_args},
+                        is_untrusted=session_untrusted,
+                    )
+                    if not act_res["allowed"] and self._block:
+                        raise SecurityViolationError(
+                            f"LightGuard Action Firewall Block: {act_res['reason']}"
+                        )
 
 
 class LightGuardClientWrapper:
@@ -404,3 +596,6 @@ def wrap(
 
     # Fallback to client proxy
     return LightGuardClientWrapper(target, guard=active_guard, block_on_violation=block_on_violation)
+
+
+wrap_client = wrap

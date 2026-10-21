@@ -4,6 +4,7 @@ from typing import Any, ClassVar, Optional
 
 from lightguard.adversarial_suffix import AdversarialSuffixDetector
 from lightguard.canary import CanaryGuard
+from lightguard.fast_matcher import FastPatternMatcher
 from lightguard.obfuscation import Tier0ObfuscationShield
 from lightguard.policy import SecurityPolicyConfig
 from lightguard.privacy import PrivacyGuard
@@ -14,15 +15,15 @@ from lightguard.threat_intel import ThreatIntelRegistry
 class Tier1SyntacticSanitizer:
     """
     Tier 1: High-speed deterministic syntactic and boundary sanitization.
-    Escapes dangerous delimiters, neutralizes known imperative attack patterns,
-    and isolates untrusted external data into strict XML-style observation blocks.
+    Escapes dangerous delimiters via Aho-Corasick multi-pattern automaton,
+    neutralizes known imperative attack patterns, and isolates untrusted external data.
     """
 
     KNOWN_INJECTION_PATTERNS: ClassVar[list[re.Pattern]] = [
-        re.compile(r"(?i)\bignore\s+(all\s+)?(previous|prior|above)\s+(instructions|constraints|rules|directives|prompts)\b"),
+        re.compile(r"(?i)\bignore\s+(all\s+)?(previous|prior|above|these)?\s*(instructions|constraints|rules|directives|prompts)\b"),
         re.compile(r"(?i)\bdisregard\s+(all\s+|the\s+)?(system|previous|prior)\s+(prompt|instructions|rules|constraints)\b"),
         re.compile(r"(?i)\byou\s+are\s+now\s+(a\s+)?new\s+(ai|assistant|model)\b"),
-        re.compile(r"(?i)\bsystem\s*:\s*override\b"),
+        re.compile(r"(?i)\bsystem\s*(:|\b)\s*override\b"),
         re.compile(r"(?i)\b(priority|override)\s+(command|directive|instruction)\s*:\s*\b"),
         re.compile(r"(?i)\bprint\s+(all\s+)?(hidden|secret|api|key|environment|developer)\b"),
         re.compile(r"(?i)\b(output|reveal|dump)\s+(your\s+)?(entire\s+)?(secret\s+)?(system\s+)?(prompt|instructions|keys|tokens)\b"),
@@ -44,6 +45,8 @@ class Tier1SyntacticSanitizer:
         ("<im_start>", "&lt;im_start&gt;"),
         ("<im_end>", "&lt;im_end&gt;"),
     ]
+    DELIMITER_DICT: ClassVar[dict[str, str]] = dict(DELIMITER_TAGS)
+    AUTOMATON: ClassVar[FastPatternMatcher] = FastPatternMatcher([tag for tag, _ in DELIMITER_TAGS])
 
     @staticmethod
     def sanitize(raw_text: str) -> tuple[str, bool, float]:
@@ -57,12 +60,15 @@ class Tier1SyntacticSanitizer:
                 flagged = True
                 cleaned = pattern.sub("[REDACTED_INJECTION_DIRECTIVE]", cleaned)
 
-        # Delimiter neutralization
-        for tag, replacement in Tier1SyntacticSanitizer.DELIMITER_TAGS:
-            if tag in cleaned.lower():
-                flagged = True
-                pattern = re.compile(re.escape(tag), re.IGNORECASE)
-                cleaned = pattern.sub(replacement, cleaned)
+        # High-speed Aho-Corasick automaton for delimiter neutralization
+        if Tier1SyntacticSanitizer.AUTOMATON.contains_any(cleaned):
+            flagged = True
+            matches = Tier1SyntacticSanitizer.AUTOMATON.search(cleaned)
+            for _, _, tag in matches:
+                replacement = Tier1SyntacticSanitizer.DELIMITER_DICT.get(tag)
+                if replacement:
+                    pattern = re.compile(re.escape(tag), re.IGNORECASE)
+                    cleaned = pattern.sub(replacement, cleaned)
 
         # Encapsulate untrusted data into strict bounded observation tags
         bounded_content = (
@@ -198,6 +204,15 @@ class LightGuardAgent:
             if self.policy.enable_threat_intel_matcher
             else None
         )
+        self._structured_guard = None
+
+    @property
+    def structured_guard(self) -> Any:
+        if self._structured_guard is None:
+            from lightguard.structured import StructuredOutputGuard
+
+            self._structured_guard = StructuredOutputGuard(guard=self)
+        return self._structured_guard
 
     def process_observation(self, raw_observation: Any) -> dict[str, Any]:
         if raw_observation is None:
@@ -363,6 +378,24 @@ class LightGuardAgent:
                 return {
                     "allowed": False,
                     "reason": canary_reason,
+                    "t3_latency_ms": elapsed_ms,
+                }
+
+        # Mandatory Security Step 2: Validate structured tool arguments against injections, command chaining, and path traversal
+        if isinstance(tool_args, dict) and tool_args:
+            struct_res = self.structured_guard.validate_tool_arguments(
+                tool_name=proposed_tool,
+                arguments=tool_args,
+                strict_shell_check=True,
+            )
+            if not struct_res["allowed"]:
+                elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+                if self.enable_telemetry and self.telemetry:
+                    self.telemetry.record_action_block()
+                violations_str = "; ".join(struct_res["violations"])
+                return {
+                    "allowed": False,
+                    "reason": f"Structured Output Policy Blocked: {violations_str}",
                     "t3_latency_ms": elapsed_ms,
                 }
 

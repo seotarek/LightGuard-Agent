@@ -135,8 +135,13 @@ class ThreatIntelRegistry:
 
         # 2. HMAC authenticity verification (proves trusted publisher identity)
         target_hmac = expected_hmac or data.get("hmac_signature")
-        if verify_hmac_key and target_hmac:
+        if verify_hmac_key:
+            if not target_hmac:
+                raise ValueError(
+                    "Threat intelligence HMAC verification required but feed lacks cryptographic signature."
+                )
             import hmac
+
             verify_copy = {k: v for k, v in data.items() if k not in ("sha256", "hmac_signature")}
             canonical_bytes = json.dumps(verify_copy, sort_keys=True).encode("utf-8")
             computed_hmac = hmac.new(

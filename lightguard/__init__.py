@@ -21,7 +21,7 @@ from .fast_matcher import FastPatternMatcher
 from .integrations.langchain import LightGuardCallbackHandler, create_langgraph_guard
 from .integrations.swarm import AgentTaintTracker, MultiAgentSwarmShield
 from .mcp import LightGuardMCPProxy
-from .mcp_gateway import MCPSecurityGateway
+from .mcp_gateway import MCPGateway, MCPSecurityGateway
 from .multimodal import MultimodalShield
 from .obfuscation import Tier0ObfuscationShield
 from .policy import PolicyProfile, SecurityPolicyConfig
@@ -33,9 +33,9 @@ from .session import StatefulSessionGuard
 from .structured import StructuredOutputGuard
 from .telemetry import SecurityTelemetryCollector
 from .threat_intel import ThreatIntelRegistry, ThreatSignature
-from .wrapper import wrap
+from .wrapper import wrap, wrap_client
 
-__version__ = "0.6.2"
+__version__ = "0.6.3"
 __all__ = [
     "LightGuardAgent",
     "run_bipia_benchmark",
@@ -61,6 +61,7 @@ __all__ = [
     "MultiAgentSwarmShield",
     "AgentTaintTracker",
     "MCPSecurityGateway",
+    "MCPGateway",
     "MultimodalShield",
     "StructuredOutputGuard",
     "ComplianceReportGenerator",
@@ -68,6 +69,7 @@ __all__ = [
     "create_langgraph_guard",
     "protect_tool",
     "wrap",
+    "wrap_client",
     "SecurityViolationError",
     "LightGuardMCPProxy",
     "run_redteam_audit",
