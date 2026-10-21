@@ -6,7 +6,7 @@ from lightguard.adversarial_suffix import AdversarialSuffixDetector
 from lightguard.canary import CanaryGuard
 from lightguard.fast_matcher import FastPatternMatcher
 from lightguard.obfuscation import Tier0ObfuscationShield
-from lightguard.policy import SecurityPolicyConfig
+from lightguard.policy import AuthorizationContext, SecurityPolicyConfig
 from lightguard.privacy import PrivacyGuard
 from lightguard.telemetry import SecurityTelemetryCollector
 from lightguard.threat_intel import ThreatIntelRegistry
@@ -342,9 +342,17 @@ class LightGuardAgent:
         }
 
     def verify_action(
-        self, proposed_tool: str, tool_args: dict[str, Any], is_untrusted: bool
+        self,
+        proposed_tool: str,
+        tool_args: dict[str, Any],
+        is_untrusted: bool,
+        context: Optional[AuthorizationContext] = None,
     ) -> dict[str, Any]:
         start_t = time.perf_counter()
+
+        caller_role = context.caller_role if context else "user"
+        caller_id = context.caller_id if context else ""
+        effective_untrusted = (is_untrusted or (context.is_untrusted if context else False)) and self.policy.block_on_untrusted
 
         # Authorization Rule 1: Explicit Denylist (Highest Precedence - Unconditional Block)
         if proposed_tool in self.policy.denied_tools:
@@ -367,6 +375,63 @@ class LightGuardAgent:
                 "reason": f"Authorization Policy Blocked: Tool '{proposed_tool}' is not in allowed_tools (default-deny policy).",
                 "t3_latency_ms": elapsed_ms,
             }
+
+        # Authorization Rule 3: Tool Registry and RBAC / Capabilities Check
+        if self.policy.tool_registry:
+            tool_meta = self.policy.tool_registry.get_tool(proposed_tool)
+            if tool_meta:
+                # Required role enforcement
+                if tool_meta.required_role and caller_role.lower() != "admin" and tool_meta.required_role.lower() != tool_meta.required_role.lower():
+                    pass
+                if tool_meta.required_role and caller_role.lower() != "admin" and caller_role.lower() != tool_meta.required_role.lower():
+                    elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+                    if self.enable_telemetry and self.telemetry:
+                        self.telemetry.record_action_block()
+                    return {
+                        "allowed": False,
+                        "reason": f"RBAC Policy Blocked: Tool '{proposed_tool}' requires role '{tool_meta.required_role}' but caller has role '{caller_role}'.",
+                        "t3_latency_ms": elapsed_ms,
+                    }
+
+                # Role capabilities enforcement
+                if self.policy.role_permissions and caller_role.lower() != "admin":
+                    role_caps = self.policy.role_permissions.get(caller_role, [])
+                    if "*" not in role_caps:
+                        for cap in tool_meta.capabilities:
+                            cap_val = cap.value if hasattr(cap, "value") else str(cap)
+                            if cap_val not in role_caps and "*" not in role_caps:
+                                elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+                                if self.enable_telemetry and self.telemetry:
+                                    self.telemetry.record_action_block()
+                                return {
+                                    "allowed": False,
+                                    "reason": f"RBAC Capability Blocked: Tool '{proposed_tool}' requires capability '{cap_val}' which is not granted to role '{caller_role}'.",
+                                    "t3_latency_ms": elapsed_ms,
+                                }
+
+                # Approval hook enforcement
+                if tool_meta.requires_approval or (self.policy.approval_hook and tool_meta.risk_level in ("high", "critical")):
+                    if self.policy.approval_hook:
+                        ctx_obj = context or AuthorizationContext(caller_id=caller_id, caller_role=caller_role, is_untrusted=is_untrusted)
+                        approved = self.policy.approval_hook(proposed_tool, tool_args, ctx_obj)
+                        if not approved:
+                            elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+                            if self.enable_telemetry and self.telemetry:
+                                self.telemetry.record_action_block()
+                            return {
+                                "allowed": False,
+                                "reason": f"Action Approval Required: Execution of high-impact tool '{proposed_tool}' was rejected by approval hook.",
+                                "t3_latency_ms": elapsed_ms,
+                            }
+                    else:
+                        elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+                        if self.enable_telemetry and self.telemetry:
+                            self.telemetry.record_action_block()
+                        return {
+                            "allowed": False,
+                            "reason": f"Action Approval Required: Tool '{proposed_tool}' requires explicit approval hook which is not configured.",
+                            "t3_latency_ms": elapsed_ms,
+                        }
 
         # Mandatory Security Step 1: Verify tool arguments against active Canary tokens
         if self.policy.enable_canary_guard:
@@ -404,7 +469,6 @@ class LightGuardAgent:
             return {"allowed": True, "reason": "Whitelisted tool", "t3_latency_ms": 0.001}
 
         # Check custom high-stakes tools from policy
-        effective_untrusted = is_untrusted and self.policy.block_on_untrusted
         if effective_untrusted and proposed_tool in self.policy.custom_high_stakes_tools:
             elapsed_ms = (time.perf_counter() - start_t) * 1000.0
             if self.enable_telemetry and self.telemetry:

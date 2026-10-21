@@ -10,6 +10,87 @@ class PolicyProfile(str, enum.Enum):
     PERMISSIVE = "permissive"  # Telemetry, auditing, monitoring mode (no active blocks)
 
 
+class ToolCapability(str, enum.Enum):
+    FS_READ = "fs:read"
+    FS_WRITE = "fs:write"
+    SHELL_EXEC = "shell:exec"
+    NETWORK_OUTBOUND = "net:outbound"
+    DB_QUERY = "db:query"
+    SYSTEM_ADMIN = "system:admin"
+    CUSTOM = "custom"
+
+
+@dataclasses.dataclass
+class ToolMetadata:
+    name: str
+    description: str = ""
+    capabilities: set[Any] = dataclasses.field(default_factory=set)
+    risk_level: str = "low"  # low, medium, high, critical
+    required_role: str = ""  # e.g. "admin", "operator"
+    requires_approval: bool = False
+    parameters_schema: Optional[dict[str, Any]] = None
+
+    def __post_init__(self):
+        # Convert any string capabilities to ToolCapability or keep string
+        norm_caps = set()
+        for cap in self.capabilities:
+            if isinstance(cap, ToolCapability):
+                norm_caps.add(cap)
+            elif isinstance(cap, str):
+                try:
+                    norm_caps.add(ToolCapability(cap))
+                except ValueError:
+                    norm_caps.add(cap)
+            else:
+                norm_caps.add(cap)
+        self.capabilities = norm_caps
+
+
+class ToolPolicyRegistry:
+    """Central registry for tool capabilities, risk profiles, and RBAC requirements."""
+
+    def __init__(self):
+        self._tools: dict[str, ToolMetadata] = {}
+
+    def register_tool(self, metadata: ToolMetadata) -> None:
+        self._tools[metadata.name] = metadata
+
+    def get_tool(self, name: str) -> Optional[ToolMetadata]:
+        return self._tools.get(name)
+
+    def has_capability(self, tool_name: str, capability: Any) -> bool:
+        tool = self._tools.get(tool_name)
+        if not tool:
+            return False
+        if isinstance(capability, str):
+            try:
+                cap_enum = ToolCapability(capability)
+                return cap_enum in tool.capabilities or capability in tool.capabilities
+            except ValueError:
+                return capability in tool.capabilities
+        return capability in tool.capabilities
+
+    def list_tools(self, caller_role: str = "") -> list[ToolMetadata]:
+        """Returns tools accessible by caller_role. Empty role or admin gets all."""
+        if not caller_role or caller_role.lower() == "admin":
+            return list(self._tools.values())
+
+        accessible = []
+        for tool in self._tools.values():
+            if not tool.required_role or tool.required_role.lower() == caller_role.lower():
+                accessible.append(tool)
+        return accessible
+
+
+@dataclasses.dataclass
+class AuthorizationContext:
+    caller_id: str = ""
+    caller_role: str = "user"
+    is_untrusted: bool = False
+    session_id: str = ""
+    metadata: dict[str, Any] = dataclasses.field(default_factory=dict)
+
+
 @dataclasses.dataclass
 class SecurityPolicyConfig:
     profile: PolicyProfile = PolicyProfile.BALANCED
@@ -24,6 +105,11 @@ class SecurityPolicyConfig:
     denied_tools: list[str] = dataclasses.field(default_factory=list)
     enable_adversarial_suffix_detector: bool = True
     enable_threat_intel_matcher: bool = True
+    tool_registry: Optional[ToolPolicyRegistry] = None
+    role_permissions: dict[str, list[str]] = dataclasses.field(default_factory=dict)
+    approval_hook: Optional[Any] = None  # Callable[[str, dict, AuthorizationContext], bool]
+    resource_roots: list[str] = dataclasses.field(default_factory=list)
+    allowed_url_schemes: list[str] = dataclasses.field(default_factory=lambda: ["http", "https"])
 
     @classmethod
     def strict(cls) -> "SecurityPolicyConfig":
