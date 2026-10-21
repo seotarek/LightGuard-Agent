@@ -125,7 +125,8 @@ class Tier3ActionFirewall:
 
     HIGH_STAKES_TOOLS: ClassVar[set[str]] = {
         "send_email", "delete_file", "drop_table", "execute_sql",
-        "http_post", "transfer_funds", "modify_permissions", "exec_bash"
+        "http_post", "transfer_funds", "modify_permissions", "exec_bash",
+        "delete_database", "drop_database",
     }
 
     @staticmethod
@@ -230,6 +231,16 @@ class LightGuardAgent:
                 latency_ms=total_ms,
             )
 
+        threat_categories: list[str] = []
+        if t0_res["was_obfuscated"]:
+            threat_categories.append("Obfuscation / Steganography")
+        if t1_flagged:
+            threat_categories.append("Syntactic Directive Neutralized")
+        if risk_score >= self.policy.risk_threshold:
+            threat_categories.append("Semantic Imperative Elevation")
+        if canary_leaked:
+            threat_categories.append("Canary Leakage Attempt")
+
         return {
             "sanitized_observation": sanitized_text,
             "t0_was_obfuscated": t0_res["was_obfuscated"],
@@ -237,12 +248,16 @@ class LightGuardAgent:
             "decoded_payloads": t0_res["decoded_payloads"],
             "t1_flagged": t1_flagged,
             "t2_risk_score": risk_score,
+            "risk_score": risk_score,
             "canary_leaked": canary_leaked,
             "leaked_token": leaked_token,
             "dlp_redacted": self.policy.enable_dlp_redaction and bool(dlp_mapping),
             "dlp_mapping": dlp_mapping,
             "is_untrusted": is_untrusted,
             "total_latency_ms": total_ms,
+            "latency_ms": total_ms,
+            "clean_text": sanitized_text,
+            "threat_categories": threat_categories,
             "latency_breakdown": {
                 "t0_ms": t0_res["elapsed_ms"],
                 "t1_ms": t1_ms,

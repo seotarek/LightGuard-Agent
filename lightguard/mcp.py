@@ -14,6 +14,14 @@ class LightGuardMCPProxy:
         self.guard = guard if guard is not None else LightGuardAgent()
         self.has_untrusted_observation: bool = False
 
+    @property
+    def session_is_untrusted(self) -> bool:
+        return self.has_untrusted_observation
+
+    @session_is_untrusted.setter
+    def session_is_untrusted(self, val: bool) -> None:
+        self.has_untrusted_observation = bool(val)
+
     def reset_session(self) -> None:
         """Reset the conversation context state."""
         self.has_untrusted_observation = False

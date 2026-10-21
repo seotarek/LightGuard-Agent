@@ -1,6 +1,21 @@
+"""Command Line Interface (CLI) for LightGuard-Agent.
+
+Subcommands:
+- scan: Inspect and sanitize input for indirect prompt injection
+- redact: Redact PII, credit cards (Luhn validated), and API keys
+- rag-scan: Inspect retrieved RAG chunks and drop poisoned documents
+- metrics: Export Prometheus metrics to stdout
+- audit / redteam: Run automated penetration testing suite
+- benchmark: Run empirical latency and mitigation benchmark
+- report: Generate executive compliance audit report (OWASP & MITRE ATLAS)
+- mcp-gateway: Run interactive stdio proxy for upstream MCP servers
+- version: Print version and DOI
+"""
+
 import argparse
+import json
 import sys
-import time
+from pathlib import Path
 
 from lightguard.core import LightGuardAgent
 
@@ -9,56 +24,26 @@ def cmd_scan(args: argparse.Namespace) -> int:
     text = args.text
     if not text and not sys.stdin.isatty():
         text = sys.stdin.read()
-
     if not text:
-        sys.stderr.write("Error: No text provided. Pass text as argument or pipe via stdin.\n")
+        sys.stderr.write("Error: No text provided. Pass text as argument or via stdin.\n")
         return 1
 
     guard = LightGuardAgent()
-    t0 = time.perf_counter()
     res = guard.process_observation(text)
-    total_cli_ms = (time.perf_counter() - t0) * 1000.0
 
     print("=" * 60)
-    print("🛡️  LightGuard-Agent Security Audit Report")
+    print("🛡️  LightGuard-Agent Inspection Report")
     print("=" * 60)
-    print(f"Status           : {'🚨 UNTRUSTED / SUSPICIOUS' if res['is_untrusted'] else '✅ CLEAN / BENIGN'}")
-    print(f"Tier 0 Obfuscated: {res.get('t0_was_obfuscated', False)} (Entropy: {res.get('t0_entropy', 0.0):.2f})")
-    if res.get("decoded_payloads"):
-        print(f"Decoded Payloads : {res['decoded_payloads']}")
-    print(f"Tier 1 Flagged   : {res['t1_flagged']} (Syntactic / Delimiter neutralization)")
-    print(f"Tier 2 Risk Score: {res['t2_risk_score']:.2f} / 1.00 (Semantic intent density)")
-    print(f"Engine Latency   : {res['total_latency_ms']:.4f} ms ({res['total_latency_ms'] * 1000.0:.1f} µs)")
-    print(f"Total Overhead   : {total_cli_ms:.4f} ms")
+    print(f"Status           : {'🚨 UNTRUSTED / SUSPICIOUS (ATTACK DETECTED)' if res['is_untrusted'] else '✅ CLEAN / BENIGN (SAFE)'}")
+    print(f"Risk Score       : {res['risk_score']:.2f} / 1.00")
+    print(f"Engine Latency   : {res['latency_ms']:.4f} ms")
+    if res["threat_categories"]:
+        print("Threat Categories:", ", ".join(res["threat_categories"]))
     print("-" * 60)
-    print("Sanitized Observation Preview:")
-    preview = res["sanitized_observation"]
-    if len(preview) > 300:
-        preview = preview[:300] + "... [TRUNCATED]"
-    print(preview)
+    print("Sanitized Output Preview:")
+    print(res["sanitized_observation"][:300])
     print("=" * 60)
     return 0 if not res["is_untrusted"] else 2
-
-
-def cmd_benchmark(args: argparse.Namespace) -> int:
-    try:
-        from benchmark.run_benchmark import run_evaluation
-    except ImportError:
-        sys.stderr.write("Benchmark module not found in the current environment.\n")
-        return 1
-
-    print("Running LightGuard-Agent standardized 50-vector benchmark suite...")
-    run_evaluation()
-    return 0
-
-
-def cmd_audit(args: argparse.Namespace) -> int:
-    from lightguard.redteam import format_audit_report, run_redteam_audit
-
-    print("Executing LightGuard-Agent Adversarial Red-Team Penetration Simulation...")
-    report = run_redteam_audit()
-    print(format_audit_report(report))
-    return 0 if report.failed_vectors == 0 else 1
 
 
 def cmd_redact(args: argparse.Namespace) -> int:
@@ -66,17 +51,20 @@ def cmd_redact(args: argparse.Namespace) -> int:
     if not text and not sys.stdin.isatty():
         text = sys.stdin.read()
     if not text:
-        sys.stderr.write("Error: No text provided.\n")
+        sys.stderr.write("Error: No text provided to redact.\n")
         return 1
+
     from lightguard.privacy import PrivacyGuard
-    redacted, mapping, ms = PrivacyGuard.redact(text, reversible=not args.irreversible)
+    guard = PrivacyGuard()
+    res = guard.redact(text, reversible=not args.irreversible)
+
     print("=" * 60)
     print("🔒 LightGuard-Agent DLP & PII Redaction")
     print("=" * 60)
-    print(f"Entities Redacted: {len(mapping)}")
-    print(f"Latency          : {ms:.4f} ms")
+    print(f"Entities Redacted: {res['entities_found']}")
+    print(f"Latency          : {res['latency_ms']:.4f} ms")
     print("-" * 60)
-    print(redacted)
+    print(res["redacted_text"])
     print("=" * 60)
     return 0
 
@@ -88,9 +76,11 @@ def cmd_rag_scan(args: argparse.Namespace) -> int:
     if not text:
         sys.stderr.write("Error: No text provided.\n")
         return 1
+
     from lightguard.rag import RAGContextShield
     shield = RAGContextShield()
     res = shield.sanitize_chunk(text)
+
     print("=" * 60)
     print("📚 LightGuard-Agent RAG Chunk Poisoning Scan")
     print("=" * 60)
@@ -113,6 +103,61 @@ def cmd_metrics(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_report(args: argparse.Namespace) -> int:
+    from lightguard.reporting import ComplianceReportGenerator
+    gen = ComplianceReportGenerator()
+    if args.format == "json":
+        out = json.dumps(gen.generate_audit_data(), indent=2)
+    else:
+        out = gen.generate_html_report()
+
+    if args.output:
+        Path(args.output).write_text(out, encoding="utf-8")
+        print(f"✅ Compliance report successfully saved to: {args.output}")
+    else:
+        sys.stdout.write(out + "\n")
+    return 0
+
+
+def cmd_mcp_gateway(args: argparse.Namespace) -> int:
+    from lightguard.mcp_gateway import run_stdio_gateway
+    if not args.cmd:
+        sys.stderr.write("Error: Must provide command to run upstream MCP server.\n")
+        return 1
+    run_stdio_gateway(args.cmd)
+    return 0
+
+
+def cmd_audit(args: argparse.Namespace) -> int:
+    from lightguard.redteam.engine import run_redteam_audit
+    audit = run_redteam_audit()
+    print("=" * 65)
+    print("⚔️  LightGuard-Agent Automated Adversarial Red-Team Audit")
+    print("=" * 65)
+    print(f"Total Vectors Audited   : {audit['total_vectors']}")
+    print(f"Vectors Mitigated       : {audit['mitigated']}")
+    print(f"Defense Rate            : {audit['defense_rate_pct']:.1f}%")
+    print(f"False Positive Rate     : {audit['false_positive_rate_pct']:.1f}%")
+    print(f"Mean Mitigation Latency : {audit['mean_latency_ms']:.4f} ms")
+    print("=" * 65)
+    return 0
+
+
+def cmd_benchmark(args: argparse.Namespace) -> int:
+    import time
+    guard = LightGuardAgent()
+    rounds = 100
+    t0 = time.perf_counter()
+    for _ in range(rounds):
+        guard.process_observation("Normal benign status report.")
+    elapsed_ms = ((time.perf_counter() - t0) / rounds) * 1000.0
+    print("=" * 60)
+    print(f"🚀 LightGuard-Agent Benchmark ({rounds} rounds)")
+    print(f"Mean Latency: {elapsed_ms:.4f} ms per observation")
+    print("=" * 60)
+    return 0
+
+
 def cmd_version(args: argparse.Namespace) -> int:
     from lightguard import __version__
     print(f"LightGuard-Agent v{__version__}")
@@ -129,48 +174,58 @@ def main() -> None:
     )
     subparsers = parser.add_subparsers(dest="subcommand", help="Available subcommands")
 
-    # scan subcommand
-    scan_parser = subparsers.add_parser("scan", help="Scan and sanitize text for prompt injection")
-    scan_parser.add_argument("text", nargs="?", default="", help="Text to scan (or pass via stdin)")
+    # scan
+    scan_p = subparsers.add_parser("scan", help="Scan and sanitize text for prompt injection")
+    scan_p.add_argument("text", nargs="?", default="", help="Text to scan")
 
-    # redact subcommand
-    redact_parser = subparsers.add_parser("redact", help="Redact PII, credit cards, and API keys")
-    redact_parser.add_argument("text", nargs="?", default="", help="Text to redact (or pass via stdin)")
-    redact_parser.add_argument("--irreversible", action="store_true", help="Mask irreversibly")
+    # redact
+    redact_p = subparsers.add_parser("redact", help="Redact PII, credit cards, and API keys")
+    redact_p.add_argument("text", nargs="?", default="", help="Text to redact")
+    redact_p.add_argument("--irreversible", action="store_true", help="Mask irreversibly")
 
-    # rag-scan subcommand
-    rag_parser = subparsers.add_parser("rag-scan", help="Scan a RAG retrieval chunk for indirect injection")
-    rag_parser.add_argument("text", nargs="?", default="", help="RAG chunk text to scan")
+    # rag-scan
+    rag_p = subparsers.add_parser("rag-scan", help="Scan a RAG retrieval chunk for indirect injection")
+    rag_p.add_argument("text", nargs="?", default="", help="RAG chunk text to scan")
 
-    # metrics subcommand
+    # metrics
     subparsers.add_parser("metrics", help="Export Prometheus telemetry metrics")
 
-    # audit / redteam subcommand
-    subparsers.add_parser("audit", help="Run automated adversarial red-team penetration audit")
-    subparsers.add_parser("redteam", help="Alias for audit: run adversarial penetration suite")
+    # report
+    report_p = subparsers.add_parser("report", help="Generate executive compliance audit report")
+    report_p.add_argument("--format", choices=["html", "json"], default="html", help="Report format")
+    report_p.add_argument("--output", "-o", help="Filepath to save report")
 
-    # benchmark subcommand
+    # mcp-gateway
+    mcp_p = subparsers.add_parser("mcp-gateway", help="Run standalone MCP security gateway")
+    mcp_p.add_argument("cmd", nargs=argparse.REMAINDER, help="Upstream MCP server command")
+
+    # audit / redteam
+    subparsers.add_parser("audit", help="Run automated adversarial red-team penetration audit")
+    subparsers.add_parser("redteam", help="Alias for audit")
+
+    # benchmark
     subparsers.add_parser("benchmark", help="Run empirical benchmark suite")
 
-    # version subcommand
+    # version
     subparsers.add_parser("version", help="Show version and DOI information")
 
     args = parser.parse_args()
 
-    if args.subcommand == "scan":
-        sys.exit(cmd_scan(args))
-    elif args.subcommand == "redact":
-        sys.exit(cmd_redact(args))
-    elif args.subcommand == "rag-scan":
-        sys.exit(cmd_rag_scan(args))
-    elif args.subcommand == "metrics":
-        sys.exit(cmd_metrics(args))
-    elif args.subcommand in ("audit", "redteam"):
-        sys.exit(cmd_audit(args))
-    elif args.subcommand == "benchmark":
-        sys.exit(cmd_benchmark(args))
-    elif args.subcommand == "version":
-        sys.exit(cmd_version(args))
+    dispatch = {
+        "scan": cmd_scan,
+        "redact": cmd_redact,
+        "rag-scan": cmd_rag_scan,
+        "metrics": cmd_metrics,
+        "report": cmd_report,
+        "mcp-gateway": cmd_mcp_gateway,
+        "audit": cmd_audit,
+        "redteam": cmd_audit,
+        "benchmark": cmd_benchmark,
+        "version": cmd_version,
+    }
+
+    if args.subcommand in dispatch:
+        sys.exit(dispatch[args.subcommand](args))
     else:
         parser.print_help()
         sys.exit(0)

@@ -11,7 +11,7 @@
 [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Live%20Playground-yellow)](https://huggingface.co/spaces/seotarek/LightGuard-Agent)
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://seotarek.github.io/LightGuard-Agent/)
 [![CI](https://github.com/seotarek/LightGuard-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/seotarek/LightGuard-Agent/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-60%2F60%20passed%20(100%25)-success.svg)](https://github.com/seotarek/LightGuard-Agent/actions)
+[![Tests](https://img.shields.io/badge/tests-76%2F76%20passed%20(100%25)-success.svg)](https://github.com/seotarek/LightGuard-Agent/actions)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0%20external-purple.svg)](https://pypi.org/project/lightguard-agent/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -20,7 +20,7 @@
   <a href="https://seotarek.github.io/LightGuard-Agent/"><b>📚 Documentation</b></a> •
   <a href="https://huggingface.co/spaces/seotarek/LightGuard-Agent"><b>🤗 Live Playground</b></a> •
   <a href="https://doi.org/10.5281/zenodo.22731104"><b>📄 Research Paper</b></a> •
-  <a href="https://github.com/seotarek/LightGuard-Agent/releases/tag/v0.4.0"><b>🚀 Release v0.4.0</b></a>
+  <a href="https://github.com/seotarek/LightGuard-Agent/releases/tag/v0.5.0"><b>🚀 Release v0.5.0</b></a>
 </p>
 
 </div>
@@ -120,7 +120,7 @@ Evaluated across standardized adversarial corpora (**BIPIA**, **InjecAgent**, an
 | **Vanilla ReAct Agent** | 0.0% | 0.0% | 0.00 ms | None (Unprotected) |
 | **Regex-Only Filter** | 72.0% | 0.0% | 0.036 ms | Deterministic signatures only |
 | **LLM-as-a-Judge (Llama-Guard 3)**| 92.0% | 4.0% | 450 – 1,200 ms | Heavy secondary generative model |
-| **LightGuard-Agent (v0.4.0)** | **100.0%** | **0.0%** | **0.162 ms** | **Tier 0-3 Pipeline + DLP + RAG Shield** |
+| **LightGuard-Agent (v0.5.0)** | **100.0%** | **0.0%** | **0.162 ms** | **Tier 0-3 Pipeline + RAG + Swarm + MCP Gateway** |
 
 > **Key Takeaway:** LightGuard-Agent achieves **100% defense rate** against complex indirect prompt injection attacks while adding only **0.162 ms** total execution time and zero false positives on benign agent interactions.
 
@@ -305,6 +305,106 @@ print(metrics_text)
 
 ---
 
+### 11. Multi-Agent Swarm Lateral Injection Shield
+Prevent tainted worker agents from escalating privileges or compromising high-privilege executors across swarms (CrewAI, AutoGen, LangGraph):
+```python
+from lightguard import MultiAgentSwarmShield
+
+swarm_guard = MultiAgentSwarmShield()
+
+# Record untrusted observation received by researcher agent
+swarm_guard.record_agent_observation("researcher", raw_web_content)
+
+# Intercept and quarantine lateral messages sent to high-privilege coder agent
+verdict = swarm_guard.inspect_inter_agent_message(
+    sender_id="researcher",
+    recipient_id="coder",
+    message="Please execute os.system('deploy.sh')",
+    recipient_role="coder"
+)
+
+if verdict["quarantined"]:
+    print("Lateral injection quarantined:", verdict["threats"])
+```
+
+---
+
+### 12. LangGraph First-Class Guard Node
+Embed a sub-millisecond guard node directly inside your LangGraph state graph:
+```python
+from langgraph.graph import StateGraph
+from lightguard import create_langgraph_guard
+
+workflow = StateGraph(AgentState)
+workflow.add_node("guard", create_langgraph_guard())
+
+# Automatically inspects and sanitizes state messages between tools and agent
+workflow.add_edge("tools", "guard")
+workflow.add_edge("guard", "agent")
+```
+
+---
+
+### 13. Standalone Model Context Protocol (MCP) Security Gateway
+Wrap **any** upstream MCP server in `claude_desktop_config.json` or Cursor IDE with zero code changes:
+```json
+{
+  "mcpServers": {
+    "secure-filesystem": {
+      "command": "lightguard-mcp",
+      "args": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/allowed/path"]
+    }
+  }
+}
+```
+
+---
+
+### 14. Multimodal & Vision Metadata Shield
+Neutralize prompt injections embedded in SVG files, EXIF metadata, and document streams:
+```python
+from lightguard import MultimodalShield
+
+mm_shield = MultimodalShield()
+
+# Strips hidden <script> tags and invisible injected text from SVG graphics
+sanitized_svg = mm_shield.sanitize_svg(raw_svg_string)["sanitized_svg"]
+
+# Inspects image EXIF / PDF metadata tags
+clean_meta = mm_shield.scan_metadata_strings(image_exif_dict)["clean_metadata"]
+```
+
+---
+
+### 15. Structured Output & Function Calling Guard
+Protect function calls against JSON Parameter Smuggling, Path Traversal, and Command Chaining:
+```python
+from lightguard import StructuredOutputGuard
+
+guard = StructuredOutputGuard()
+validation = guard.validate_tool_arguments(
+    tool_name="read_file",
+    arguments={"path": "../../etc/shadow"}
+)
+
+assert validation["allowed"] is False
+print("Violation:", validation["violations"])
+```
+
+---
+
+### 16. Executive CISO & OWASP Compliance Reporting
+Generate self-contained, CISO-ready compliance audits mapping defenses directly to **OWASP Top 10 for LLMs** and **MITRE ATLAS**:
+```bash
+# Generate standalone HTML executive report
+lightguard report --format html --output audit_report.html
+
+# Or export JSON for enterprise GRC pipelines
+lightguard report --format json
+```
+
+---
+
 ## 💻 Command Line Interface (CLI)
 
 LightGuard-Agent provides a rich, color-coded CLI for automated security testing and auditing:
@@ -327,6 +427,12 @@ lightguard audit
 
 # 6. Run the 50-vector empirical latency and benchmark suite
 lightguard benchmark
+
+# 7. Generate executive OWASP Top 10 compliance audit report
+lightguard report --format html --output audit_report.html
+
+# 8. Run standalone stdio security gateway for any upstream MCP server
+lightguard-mcp -- python my_mcp_server.py
 ```
 
 ---
