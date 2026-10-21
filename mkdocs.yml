@@ -43,6 +43,11 @@ nav:
   - Security Defenses: defenses.md
   - RAG Context Shield: rag.md
   - DLP & Privacy Redaction: privacy.md
+  - Multi-Agent Swarm Shield: swarm.md
+  - MCP Security Gateway: mcp_gateway.md
+  - Multimodal & Metadata Shield: multimodal.md
+  - Structured Output Guard: structured.md
+  - Executive Compliance Report: reporting.md
   - Security Policies: policy.md
   - Telemetry & Observability: telemetry.md
   - Universal Wrapper & Middleware: wrapper.md
