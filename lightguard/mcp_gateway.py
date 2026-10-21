@@ -29,16 +29,24 @@ class MCPSecurityGateway:
         self.max_message_size = max_message_size
         self.audit_logger = audit_logger or getattr(self.guard, "audit_logger", None)
 
-    def handle_message(self, message: Union[str, dict[str, Any]]) -> dict[str, Any]:
+    def handle_message(
+        self,
+        message: Union[str, dict[str, Any]],
+        context: Optional[Any] = None,
+    ) -> dict[str, Any]:
         """Convenience method for directly processing in-memory JSON-RPC messages."""
         raw_str = json.dumps(message) if isinstance(message, dict) else str(message)
-        allowed, out_str = self.process_client_to_server(raw_str)
+        allowed, out_str = self.process_client_to_server(raw_str, context=context)
         try:
             return json.loads(out_str)
         except Exception:
             return {"raw": out_str, "allowed": allowed}
 
-    def process_client_to_server(self, raw_message: str) -> Tuple[bool, str]:
+    def process_client_to_server(
+        self,
+        raw_message: str,
+        context: Optional[Any] = None,
+    ) -> Tuple[bool, str]:
         """Inspect client requests before sending to the MCP server.
 
         Returns (allowed, forwarded_or_error_message).
@@ -159,6 +167,7 @@ class MCPSecurityGateway:
             validation = self.proxy.intercept_request(
                 tool_name=tool_name,
                 arguments=tool_args,
+                context=context,
             )
 
             if not validation["allowed"]:

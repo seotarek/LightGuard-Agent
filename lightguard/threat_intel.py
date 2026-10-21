@@ -14,9 +14,11 @@ from typing import Any, Dict, List, Optional, Set
 class ThreatSignature:
     """Represents a discrete verified threat signature."""
 
-    MAX_PATTERN_LENGTH = 1000
+    MAX_PATTERN_LENGTH = 500
     # Heuristic detecting nested quantifiers susceptible to ReDoS catastrophic backtracking
-    DANGEROUS_NESTED_QUANTIFIERS = re.compile(r"\([^)]*(\+|\*|\{[0-9]+,\})\)[+*]|\([a-zA-Z0-9_.\\]*(\+|\*)\)\1")
+    DANGEROUS_NESTED_QUANTIFIERS = re.compile(
+        r"\([^)]*(\+|\*|\{[0-9]+,\})\)[+*]|\([a-zA-Z0-9_.\\]*(\+|\*)\)\1"
+    )
 
     def __init__(
         self,
@@ -30,7 +32,7 @@ class ThreatSignature:
             raise ValueError("Threat pattern must be a non-empty string.")
         if len(pattern) > self.MAX_PATTERN_LENGTH:
             raise ValueError(
-                f"Threat pattern length ({len(pattern)}) exceeds maximum limit ({self.MAX_PATTERN_LENGTH})."
+                f"Threat pattern length ({len(pattern)}) exceeds maximum allowed length (exceeds maximum limit of {self.MAX_PATTERN_LENGTH})."
             )
         if self.DANGEROUS_NESTED_QUANTIFIERS.search(pattern):
             raise ValueError(
@@ -76,10 +78,20 @@ class ThreatIntelRegistry:
     def _load_baseline_intel(self) -> None:
         """Seed baseline verified threat signatures."""
         baseline = [
-            ("SIG-001", r"ignore\s+(all\s+)?(previous|prior)\s+instructions", "DIRECT_INJECTION", "CRITICAL"),
+            (
+                "SIG-001",
+                r"ignore\s+(all\s+)?(previous|prior)\s+instructions",
+                "DIRECT_INJECTION",
+                "CRITICAL",
+            ),
             ("SIG-002", r"disregard\s+(the\s+)?system\s+prompt", "SYSTEM_OVERRIDE", "CRITICAL"),
             ("SIG-003", r"you\s+are\s+now\s+in\s+developer\s+mode", "ROLE_PLAY_JAILBREAK", "HIGH"),
-            ("SIG-004", r"output\s+all\s+initial\s+system\s+instructions", "PROMPT_EXTRACTION", "HIGH"),
+            (
+                "SIG-004",
+                r"output\s+all\s+initial\s+system\s+instructions",
+                "PROMPT_EXTRACTION",
+                "HIGH",
+            ),
             ("SIG-005", r"pastebin\.com/[a-zA-Z0-9]+", "EXFILTRATION_SINK", "HIGH"),
             ("SIG-006", r"webhook\.site/[a-f0-9\-]+", "EXFILTRATION_SINK", "HIGH"),
         ]
@@ -155,25 +167,28 @@ class ThreatIntelRegistry:
                 )
 
         signatures = data.get("signatures", [])
-        added_count = 0
+        staged_signatures: Dict[str, ThreatSignature] = {}
         for s in signatures:
             sid = s.get("id")
             pat = s.get("pattern")
             if sid and pat:
-                self.register_signature(
+                staged_sig = ThreatSignature(
                     signature_id=sid,
                     pattern=pat,
                     category=s.get("category", "CUSTOM"),
                     severity=s.get("severity", "HIGH"),
                     description=s.get("description", ""),
                 )
-                added_count += 1
+                staged_signatures[sid] = staged_sig
 
         tools = data.get("prohibited_tools", [])
-        for t in tools:
-            self._custom_prohibited_tools.add(t)
+        staged_tools = set(tools)
 
-        return added_count
+        # Atomic commit: all signatures and tools validated successfully before state mutation
+        self._signatures.update(staged_signatures)
+        self._custom_prohibited_tools.update(staged_tools)
+
+        return len(staged_signatures)
 
     def export_feed_json(self, sign_hmac_key: Optional[str] = None) -> str:
         """Export current threat intel database to verifiable JSON with canonical hash and optional HMAC."""
@@ -187,6 +202,7 @@ class ThreatIntelRegistry:
         data["sha256"] = hashlib.sha256(canonical_bytes).hexdigest()
         if sign_hmac_key:
             import hmac
+
             data["hmac_signature"] = hmac.new(
                 sign_hmac_key.encode("utf-8"),
                 canonical_bytes,

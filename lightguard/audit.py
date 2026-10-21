@@ -36,6 +36,8 @@ class SecurityReasonCode(str, Enum):
     # Tool Authorization & RBAC
     LG_TOOL_EXPLICIT_DENY = "LG_TOOL_EXPLICIT_DENY"
     LG_TOOL_NOT_IN_ALLOWLIST = "LG_TOOL_NOT_IN_ALLOWLIST"
+    LG_TOOL_NOT_REGISTERED = "LG_TOOL_NOT_REGISTERED"
+    LG_TOOL_SCHEMA_INVALID = "LG_TOOL_SCHEMA_INVALID"
     LG_TOOL_ROLE_UNAUTHORIZED = "LG_TOOL_ROLE_UNAUTHORIZED"
     LG_TOOL_CAPABILITY_UNAUTHORIZED = "LG_TOOL_CAPABILITY_UNAUTHORIZED"
     LG_TOOL_APPROVAL_REJECTED = "LG_TOOL_APPROVAL_REJECTED"
@@ -45,6 +47,7 @@ class SecurityReasonCode(str, Enum):
     # Structured Argument Security
     LG_TOOL_SSRF = "LG_TOOL_SSRF"
     LG_TOOL_PATH_TRAVERSAL = "LG_TOOL_PATH_TRAVERSAL"
+    LG_TOOL_RESOURCE_ROOT_VIOLATION = "LG_TOOL_RESOURCE_ROOT_VIOLATION"
     LG_TOOL_COMMAND_INJECTION = "LG_TOOL_COMMAND_INJECTION"
     LG_TOOL_SQLI = "LG_TOOL_SQLI"
     LG_TOOL_PAYLOAD_LIMIT = "LG_TOOL_PAYLOAD_LIMIT"
@@ -72,7 +75,9 @@ class AuditEvent:
 
     event_id: str
     timestamp: float
-    event_type: str  # "observation", "action_verification", "mcp_request", "rag_ingest", "dlp_redact"
+    event_type: (
+        str  # "observation", "action_verification", "mcp_request", "rag_ingest", "dlp_redact"
+    )
     decision: str  # "ALLOW", "BLOCK", "REDACT", "WARN"
     reason_code: SecurityReasonCode
     reason: str
@@ -86,7 +91,9 @@ class AuditEvent:
     def to_dict(self) -> dict[str, Any]:
         """Converts event to dictionary with serializable reason code."""
         d = asdict(self)
-        d["reason_code"] = self.reason_code.value if hasattr(self.reason_code, "value") else str(self.reason_code)
+        d["reason_code"] = (
+            self.reason_code.value if hasattr(self.reason_code, "value") else str(self.reason_code)
+        )
         return d
 
     def to_json(self) -> str:

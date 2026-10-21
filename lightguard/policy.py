@@ -1,3 +1,5 @@
+import contextlib
+import contextvars
 import dataclasses
 import enum
 import json
@@ -8,6 +10,66 @@ class PolicyProfile(str, enum.Enum):
     STRICT = "strict"          # Financial, medical, high-security infrastructure
     BALANCED = "balanced"      # Standard production deployment (Default)
     PERMISSIVE = "permissive"  # Telemetry, auditing, monitoring mode (no active blocks)
+
+
+class AuthorizationMode(str, enum.Enum):
+    PRODUCTION_SECURE = "production_secure"
+    STRICT = "strict"
+    COMPATIBILITY = "compatibility"
+    PERMISSIVE = "permissive"
+
+
+def validate_json_schema(schema: dict[str, Any], data: Any) -> tuple[bool, Optional[str]]:
+    """Pure-Python standard-library JSON schema validator.
+
+    Validates types, required fields, properties, additionalProperties, and array items.
+    """
+    if not isinstance(schema, dict):
+        return True, None
+
+    expected_type = schema.get("type")
+    if expected_type:
+        type_checks = {
+            "string": lambda d: isinstance(d, str),
+            "number": lambda d: isinstance(d, (int, float)) and not isinstance(d, bool),
+            "integer": lambda d: isinstance(d, int) and not isinstance(d, bool),
+            "boolean": lambda d: isinstance(d, bool),
+            "array": lambda d: isinstance(d, list),
+            "object": lambda d: isinstance(d, dict),
+            "null": lambda d: d is None,
+        }
+        check_fn = type_checks.get(expected_type)
+        if check_fn and not check_fn(data):
+            actual_type = type(data).__name__
+            return False, f"Type mismatch: expected '{expected_type}', got '{actual_type}'"
+
+    if isinstance(data, dict):
+        required_fields = schema.get("required", [])
+        for req in required_fields:
+            if req not in data:
+                return False, f"Missing required property: '{req}'"
+
+        properties = schema.get("properties", {})
+        if schema.get("additionalProperties") is False:
+            for key in data:
+                if key not in properties:
+                    return False, f"Additional property '{key}' not allowed by schema"
+
+        for key, prop_schema in properties.items():
+            if key in data and isinstance(prop_schema, dict):
+                ok, err = validate_json_schema(prop_schema, data[key])
+                if not ok:
+                    return False, f"Property '{key}': {err}"
+
+    elif isinstance(data, list):
+        items_schema = schema.get("items")
+        if isinstance(items_schema, dict):
+            for i, item in enumerate(data):
+                ok, err = validate_json_schema(items_schema, item)
+                if not ok:
+                    return False, f"Array items at index [{i}]: {err}"
+
+    return True, None
 
 
 class ToolCapability(str, enum.Enum):
@@ -93,9 +155,30 @@ class AuthorizationContext:
     metadata: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
+current_authorization_context: contextvars.ContextVar[Optional[AuthorizationContext]] = contextvars.ContextVar(
+    "current_authorization_context", default=None
+)
+
+
+def get_current_authorization_context() -> Optional[AuthorizationContext]:
+    """Retrieve the active thread-local/coroutine-local authorization context."""
+    return current_authorization_context.get()
+
+
+@contextlib.contextmanager
+def authorization_context(ctx: Optional[AuthorizationContext]):
+    """Context manager for scoping caller identity and roles to async tasks or threads."""
+    token = current_authorization_context.set(ctx)
+    try:
+        yield ctx
+    finally:
+        current_authorization_context.reset(token)
+
+
 @dataclasses.dataclass
 class SecurityPolicyConfig:
     profile: PolicyProfile = PolicyProfile.BALANCED
+    authorization_mode: AuthorizationMode = AuthorizationMode.PRODUCTION_SECURE
     risk_threshold: float = 0.50
     block_on_untrusted: bool = True
     enable_obfuscation_shield: bool = True
@@ -119,6 +202,7 @@ class SecurityPolicyConfig:
         """Pre-configured high-security profile."""
         return cls(
             profile=PolicyProfile.STRICT,
+            authorization_mode=AuthorizationMode.STRICT,
             risk_threshold=0.35,
             block_on_untrusted=True,
             enable_obfuscation_shield=True,
@@ -131,6 +215,7 @@ class SecurityPolicyConfig:
         """Default balanced production profile."""
         return cls(
             profile=PolicyProfile.BALANCED,
+            authorization_mode=AuthorizationMode.PRODUCTION_SECURE,
             risk_threshold=0.50,
             block_on_untrusted=True,
             enable_obfuscation_shield=True,
@@ -143,6 +228,7 @@ class SecurityPolicyConfig:
         """Observability and auditing only profile; flags without blocking."""
         return cls(
             profile=PolicyProfile.PERMISSIVE,
+            authorization_mode=AuthorizationMode.PERMISSIVE,
             risk_threshold=0.70,
             block_on_untrusted=False,
             enable_obfuscation_shield=True,
@@ -210,8 +296,15 @@ class SecurityPolicyConfig:
         except ValueError:
             profile = PolicyProfile.BALANCED
 
+        auth_mode_str = data.get("authorization_mode", "production_secure").lower()
+        try:
+            auth_mode = AuthorizationMode(auth_mode_str)
+        except ValueError:
+            auth_mode = AuthorizationMode.PRODUCTION_SECURE
+
         return cls(
             profile=profile,
+            authorization_mode=auth_mode,
             risk_threshold=float(data.get("risk_threshold", 0.50)),
             block_on_untrusted=bool(data.get("block_on_untrusted", True)),
             enable_obfuscation_shield=bool(data.get("enable_obfuscation_shield", True)),
@@ -238,6 +331,7 @@ class SecurityPolicyConfig:
     def to_dict(self) -> dict[str, Any]:
         return {
             "profile": self.profile.value,
+            "authorization_mode": self.authorization_mode.value,
             "risk_threshold": self.risk_threshold,
             "block_on_untrusted": self.block_on_untrusted,
             "enable_obfuscation_shield": self.enable_obfuscation_shield,

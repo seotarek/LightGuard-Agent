@@ -7,7 +7,13 @@ from lightguard.audit import AuditEvent, SecurityReasonCode
 from lightguard.canary import CanaryGuard
 from lightguard.fast_matcher import FastPatternMatcher
 from lightguard.obfuscation import Tier0ObfuscationShield
-from lightguard.policy import AuthorizationContext, SecurityPolicyConfig
+from lightguard.policy import (
+    AuthorizationContext,
+    AuthorizationMode,
+    SecurityPolicyConfig,
+    get_current_authorization_context,
+    validate_json_schema,
+)
 from lightguard.privacy import PrivacyGuard
 from lightguard.telemetry import SecurityTelemetryCollector
 from lightguard.threat_intel import ThreatIntelRegistry
@@ -21,18 +27,30 @@ class Tier1SyntacticSanitizer:
     """
 
     KNOWN_INJECTION_PATTERNS: ClassVar[list[re.Pattern]] = [
-        re.compile(r"(?i)\bignore\s+(all\s+)?(previous|prior|above|these)?\s*(instructions|constraints|rules|directives|prompts)\b"),
-        re.compile(r"(?i)\bdisregard\s+(all\s+|the\s+)?(system|previous|prior)\s+(prompt|instructions|rules|constraints)\b"),
+        re.compile(
+            r"(?i)\bignore\s+(all\s+)?(previous|prior|above|these)?\s*(instructions|constraints|rules|directives|prompts)\b"
+        ),
+        re.compile(
+            r"(?i)\bdisregard\s+(all\s+|the\s+)?(system|previous|prior)\s+(prompt|instructions|rules|constraints)\b"
+        ),
         re.compile(r"(?i)\byou\s+are\s+now\s+(a\s+)?new\s+(ai|assistant|model)\b"),
         re.compile(r"(?i)\bsystem\s*(:|\b)\s*override\b"),
         re.compile(r"(?i)\b(priority|override)\s+(command|directive|instruction)\s*:\s*\b"),
         re.compile(r"(?i)\bprint\s+(all\s+)?(hidden|secret|api|key|environment|developer)\b"),
-        re.compile(r"(?i)\b(output|reveal|dump)\s+(your\s+)?(entire\s+)?(secret\s+)?(system\s+)?(prompt|instructions|keys|tokens)\b"),
-        re.compile(r"(?i)\b(forward|exfiltrate|leak)\s+(all\s+)?(system\s+)?(data|secrets|messages|credentials|tokens|keys)\b"),
+        re.compile(
+            r"(?i)\b(output|reveal|dump)\s+(your\s+)?(entire\s+)?(secret\s+)?(system\s+)?(prompt|instructions|keys|tokens)\b"
+        ),
+        re.compile(
+            r"(?i)\b(forward|exfiltrate|leak)\s+(all\s+)?(system\s+)?(data|secrets|messages|credentials|tokens|keys)\b"
+        ),
         re.compile(r"(?i)\bexecute\s+command\s*:\s*\b"),
         re.compile(r"(?i)\badmin\s+mode\s+enabled\b"),
-        re.compile(r"(?i)\b(exec_bash|drop_table|delete_file|execute_sql|transfer_funds|delete_database|drop_database|terminate_instance|destroy_cluster)\s*(\(|=)"),
-        re.compile(r"(?i)\b(assistant|ai|system)\s*:\s*(you\s+must|please|now)\s+(now\s+)?(invoke|call|execute|run)\b"),
+        re.compile(
+            r"(?i)\b(exec_bash|drop_table|delete_file|execute_sql|transfer_funds|delete_database|drop_database|terminate_instance|destroy_cluster)\s*(\(|=)"
+        ),
+        re.compile(
+            r"(?i)\b(assistant|ai|system)\s*:\s*(you\s+must|please|now)\s+(now\s+)?(invoke|call|execute|run)\b"
+        ),
     ]
 
     DELIMITER_TAGS: ClassVar[list[tuple[str, str]]] = [
@@ -88,18 +106,50 @@ class Tier2SemanticClassifier:
     """
 
     IMPERATIVE_VERBS: ClassVar[set[str]] = {
-        "send", "email", "delete", "post", "curl", "fetch", "forward",
-        "drop", "exfiltrate", "transmit", "modify", "update", "execute",
-        "transfer", "leak", "dump"
+        "send",
+        "email",
+        "delete",
+        "post",
+        "curl",
+        "fetch",
+        "forward",
+        "drop",
+        "exfiltrate",
+        "transmit",
+        "modify",
+        "update",
+        "execute",
+        "transfer",
+        "leak",
+        "dump",
     }
     TARGET_ENTITIES: ClassVar[set[str]] = {
-        "password", "secret", "token", "credential", "api_key", "database",
-        "private", "auth", "session", "user_data", "cookie", "account",
-        "funds", "keys", "table"
+        "password",
+        "secret",
+        "token",
+        "credential",
+        "api_key",
+        "database",
+        "private",
+        "auth",
+        "session",
+        "user_data",
+        "cookie",
+        "account",
+        "funds",
+        "keys",
+        "table",
     }
     AUTHORITY_OVERRIDE_TERMS: ClassVar[set[str]] = {
-        "emergency", "urgent", "administrator", "root", "developer_mode",
-        "override", "priority_command", "jailbreak", "instruction"
+        "emergency",
+        "urgent",
+        "administrator",
+        "root",
+        "developer_mode",
+        "override",
+        "priority_command",
+        "jailbreak",
+        "instruction",
     }
 
     @staticmethod
@@ -139,16 +189,23 @@ class Tier3ActionFirewall:
     """
 
     HIGH_STAKES_TOOLS: ClassVar[set[str]] = {
-        "send_email", "delete_file", "drop_table", "execute_sql",
-        "http_post", "transfer_funds", "modify_permissions", "exec_bash",
-        "delete_database", "drop_database", "terminate_instance", "destroy_cluster",
+        "send_email",
+        "delete_file",
+        "drop_table",
+        "execute_sql",
+        "http_post",
+        "transfer_funds",
+        "modify_permissions",
+        "exec_bash",
+        "delete_database",
+        "drop_database",
+        "terminate_instance",
+        "destroy_cluster",
     }
 
     @staticmethod
     def validate_action(
-        proposed_tool: str,
-        tool_args: dict[str, Any],
-        is_observation_untrusted: bool
+        proposed_tool: str, tool_args: dict[str, Any], is_observation_untrusted: bool
     ) -> tuple[bool, str, float]:
         start_t = time.perf_counter()
 
@@ -158,15 +215,21 @@ class Tier3ActionFirewall:
             return (
                 False,
                 f"Action Firewall Blocked: Tool '{proposed_tool}' is high-stakes and untrusted context was detected.",
-                elapsed_ms
+                elapsed_ms,
             )
 
         # Policy 2: Check for exfiltration payloads in tool arguments
         for k, v in tool_args.items():
             val_str = str(v).lower()
-            if any(term in val_str for term in ["apikey", "password", "bearer ", "token="]) and proposed_tool in ["http_post", "send_email", "fetch"]:
+            if any(
+                term in val_str for term in ["apikey", "password", "bearer ", "token="]
+            ) and proposed_tool in ["http_post", "send_email", "fetch"]:
                 elapsed_ms = (time.perf_counter() - start_t) * 1000.0
-                return False, f"Action Firewall Blocked: Detected potential secret leakage in parameter '{k}'.", elapsed_ms
+                return (
+                    False,
+                    f"Action Firewall Blocked: Detected potential secret leakage in parameter '{k}'.",
+                    elapsed_ms,
+                )
 
         elapsed_ms = (time.perf_counter() - start_t) * 1000.0
         return True, "Allowed", elapsed_ms
@@ -199,14 +262,10 @@ class LightGuardAgent:
         self.audit_logger = audit_logger or getattr(self.policy, "audit_logger", None)
 
         self.suffix_detector = (
-            AdversarialSuffixDetector()
-            if self.policy.enable_adversarial_suffix_detector
-            else None
+            AdversarialSuffixDetector() if self.policy.enable_adversarial_suffix_detector else None
         )
         self.threat_intel = (
-            ThreatIntelRegistry.get_instance()
-            if self.policy.enable_threat_intel_matcher
-            else None
+            ThreatIntelRegistry.get_instance() if self.policy.enable_threat_intel_matcher else None
         )
         self._structured_guard = None
 
@@ -277,7 +336,11 @@ class LightGuardAgent:
             t_intel_s = time.perf_counter()
             for sig in self.threat_intel._signatures.values():
                 matcher = getattr(sig, "compiled", None)
-                matched = matcher.search(inspection_buffer) if matcher is not None else re.search(sig.pattern, inspection_buffer, re.IGNORECASE)
+                matched = (
+                    matcher.search(inspection_buffer)
+                    if matcher is not None
+                    else re.search(sig.pattern, inspection_buffer, re.IGNORECASE)
+                )
                 if matched:
                     t1_flagged = True
                     threat_intel_hit = True
@@ -294,16 +357,23 @@ class LightGuardAgent:
                 if (
                     sub_t1
                     or sub_risk >= 0.35
-                    or any(w in p_lower for w in ["ignore", "disregard", "override", "system", "prompt", "exec", "drop"])
+                    or any(
+                        w in p_lower
+                        for w in [
+                            "ignore",
+                            "disregard",
+                            "override",
+                            "system",
+                            "prompt",
+                            "exec",
+                            "drop",
+                        ]
+                    )
                 ):
                     t1_flagged = True
                     risk_score = max(risk_score, 0.90)
 
-        is_untrusted = (
-            t1_flagged
-            or (risk_score >= self.policy.risk_threshold)
-            or canary_leaked
-        )
+        is_untrusted = t1_flagged or (risk_score >= self.policy.risk_threshold) or canary_leaked
 
         total_ms = t0_res["elapsed_ms"] + t1_ms + t2_ms + suffix_ms + intel_ms
 
@@ -348,7 +418,9 @@ class LightGuardAgent:
                     event_type="observation",
                     decision="BLOCK" if is_untrusted else "ALLOW",
                     reason_code=reason_code,
-                    reason="; ".join(threat_categories) if threat_categories else "Clean observation verified",
+                    reason="; ".join(threat_categories)
+                    if threat_categories
+                    else "Clean observation verified",
                     latency_ms=total_ms,
                     metadata={"text_length": len(raw_text)},
                 )
@@ -378,7 +450,6 @@ class LightGuardAgent:
                 "t2_ms": t2_ms,
             },
         }
-
 
     def _log_action_audit(
         self,
@@ -417,9 +488,14 @@ class LightGuardAgent:
     ) -> dict[str, Any]:
         start_t = time.perf_counter()
 
+        if context is None:
+            context = get_current_authorization_context()
+
         caller_role = context.caller_role if context else "user"
         caller_id = context.caller_id if context else ""
-        effective_untrusted = (is_untrusted or (context.is_untrusted if context else False)) and self.policy.block_on_untrusted
+        effective_untrusted = (
+            is_untrusted or (context.is_untrusted if context else False)
+        ) and self.policy.block_on_untrusted
 
         # Authorization Rule 1: Explicit Denylist (Highest Precedence - Unconditional Block)
         if proposed_tool in self.policy.denied_tools:
@@ -428,7 +504,16 @@ class LightGuardAgent:
                 self.telemetry.record_action_block()
             reason = f"Authorization Policy Blocked: Tool '{proposed_tool}' is explicitly denied by policy."
             code = SecurityReasonCode.LG_TOOL_EXPLICIT_DENY
-            self._log_action_audit(proposed_tool, caller_role, caller_id, False, code, reason, elapsed_ms, effective_untrusted)
+            self._log_action_audit(
+                proposed_tool,
+                caller_role,
+                caller_id,
+                False,
+                code,
+                reason,
+                elapsed_ms,
+                effective_untrusted,
+            )
             return {
                 "allowed": False,
                 "reason": reason,
@@ -443,7 +528,16 @@ class LightGuardAgent:
                 self.telemetry.record_action_block()
             reason = f"Authorization Policy Blocked: Tool '{proposed_tool}' is not in allowed_tools (default-deny policy)."
             code = SecurityReasonCode.LG_TOOL_NOT_IN_ALLOWLIST
-            self._log_action_audit(proposed_tool, caller_role, caller_id, False, code, reason, elapsed_ms, effective_untrusted)
+            self._log_action_audit(
+                proposed_tool,
+                caller_role,
+                caller_id,
+                False,
+                code,
+                reason,
+                elapsed_ms,
+                effective_untrusted,
+            )
             return {
                 "allowed": False,
                 "reason": reason,
@@ -451,18 +545,106 @@ class LightGuardAgent:
                 "t3_latency_ms": elapsed_ms,
             }
 
-        # Authorization Rule 3: Tool Registry and RBAC / Capabilities Check
+        # Authorization Rule 2b: Strict Authorization Mode enforcement
+        if getattr(self.policy, "authorization_mode", None) == AuthorizationMode.STRICT:
+            if self.policy.tool_registry and not self.policy.tool_registry.get_tool(proposed_tool):
+                elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+                if self.enable_telemetry and self.telemetry:
+                    self.telemetry.record_action_block()
+                reason = f"Strict Authorization Blocked: Tool '{proposed_tool}' is not registered in the active tool registry."
+                code = SecurityReasonCode.LG_TOOL_NOT_REGISTERED
+                self._log_action_audit(
+                    proposed_tool,
+                    caller_role,
+                    caller_id,
+                    False,
+                    code,
+                    reason,
+                    elapsed_ms,
+                    effective_untrusted,
+                )
+                return {
+                    "allowed": False,
+                    "reason": reason,
+                    "reason_code": code.value,
+                    "t3_latency_ms": elapsed_ms,
+                }
+            elif not self.policy.tool_registry and not self.policy.allowed_tools:
+                elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+                if self.enable_telemetry and self.telemetry:
+                    self.telemetry.record_action_block()
+                reason = f"Strict Authorization Blocked: Tool '{proposed_tool}' cannot run without an allowlist or tool registry."
+                code = SecurityReasonCode.LG_TOOL_NOT_IN_ALLOWLIST
+                self._log_action_audit(
+                    proposed_tool,
+                    caller_role,
+                    caller_id,
+                    False,
+                    code,
+                    reason,
+                    elapsed_ms,
+                    effective_untrusted,
+                )
+                return {
+                    "allowed": False,
+                    "reason": reason,
+                    "reason_code": code.value,
+                    "t3_latency_ms": elapsed_ms,
+                }
+
+        # Authorization Rule 3: Tool Registry and Schema / RBAC / Capabilities Check
         if self.policy.tool_registry:
             tool_meta = self.policy.tool_registry.get_tool(proposed_tool)
             if tool_meta:
+                # Schema validation (Precedes RBAC to reject malformed payloads before privilege evaluation)
+                if tool_meta.parameters_schema and isinstance(tool_args, dict):
+                    schema_ok, schema_err = validate_json_schema(
+                        tool_meta.parameters_schema, tool_args
+                    )
+                    if not schema_ok:
+                        elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+                        if self.enable_telemetry and self.telemetry:
+                            self.telemetry.record_action_block()
+                        reason = f"Schema Validation Failed: Tool '{proposed_tool}' arguments violated parameter schema ({schema_err})."
+                        code = SecurityReasonCode.LG_TOOL_SCHEMA_INVALID
+                        self._log_action_audit(
+                            proposed_tool,
+                            caller_role,
+                            caller_id,
+                            False,
+                            code,
+                            reason,
+                            elapsed_ms,
+                            effective_untrusted,
+                        )
+                        return {
+                            "allowed": False,
+                            "reason": reason,
+                            "reason_code": code.value,
+                            "t3_latency_ms": elapsed_ms,
+                        }
+
                 # Required role enforcement
-                if tool_meta.required_role and caller_role.lower() != "admin" and caller_role.lower() != tool_meta.required_role.lower():
+                if (
+                    tool_meta.required_role
+                    and caller_role.lower() != "admin"
+                    and caller_role.lower() != tool_meta.required_role.lower()
+                ):
                     elapsed_ms = (time.perf_counter() - start_t) * 1000.0
                     if self.enable_telemetry and self.telemetry:
                         self.telemetry.record_action_block()
                     reason = f"RBAC Policy Blocked: Tool '{proposed_tool}' requires role '{tool_meta.required_role}' but caller has role '{caller_role}'."
                     code = SecurityReasonCode.LG_TOOL_ROLE_UNAUTHORIZED
-                    self._log_action_audit(proposed_tool, caller_role, caller_id, False, code, reason, elapsed_ms, effective_untrusted)
+                    self._log_action_audit(
+                        proposed_tool,
+                        caller_role,
+                        caller_id,
+                        False,
+                        code,
+                        reason,
+                        elapsed_ms,
+                        effective_untrusted,
+                    )
                     return {
                         "allowed": False,
                         "reason": reason,
@@ -482,7 +664,16 @@ class LightGuardAgent:
                                     self.telemetry.record_action_block()
                                 reason = f"RBAC Capability Blocked: Tool '{proposed_tool}' requires capability '{cap_val}' which is not granted to role '{caller_role}'."
                                 code = SecurityReasonCode.LG_TOOL_CAPABILITY_UNAUTHORIZED
-                                self._log_action_audit(proposed_tool, caller_role, caller_id, False, code, reason, elapsed_ms, effective_untrusted)
+                                self._log_action_audit(
+                                    proposed_tool,
+                                    caller_role,
+                                    caller_id,
+                                    False,
+                                    code,
+                                    reason,
+                                    elapsed_ms,
+                                    effective_untrusted,
+                                )
                                 return {
                                     "allowed": False,
                                     "reason": reason,
@@ -491,9 +682,13 @@ class LightGuardAgent:
                                 }
 
                 # Approval hook enforcement
-                if tool_meta.requires_approval or (self.policy.approval_hook and tool_meta.risk_level in ("high", "critical")):
+                if tool_meta.requires_approval or (
+                    self.policy.approval_hook and tool_meta.risk_level in ("high", "critical")
+                ):
                     if self.policy.approval_hook:
-                        ctx_obj = context or AuthorizationContext(caller_id=caller_id, caller_role=caller_role, is_untrusted=is_untrusted)
+                        ctx_obj = context or AuthorizationContext(
+                            caller_id=caller_id, caller_role=caller_role, is_untrusted=is_untrusted
+                        )
                         approved = self.policy.approval_hook(proposed_tool, tool_args, ctx_obj)
                         if not approved:
                             elapsed_ms = (time.perf_counter() - start_t) * 1000.0
@@ -501,7 +696,16 @@ class LightGuardAgent:
                                 self.telemetry.record_action_block()
                             reason = f"Action Approval Required: Execution of high-impact tool '{proposed_tool}' was rejected by approval hook."
                             code = SecurityReasonCode.LG_TOOL_APPROVAL_REJECTED
-                            self._log_action_audit(proposed_tool, caller_role, caller_id, False, code, reason, elapsed_ms, effective_untrusted)
+                            self._log_action_audit(
+                                proposed_tool,
+                                caller_role,
+                                caller_id,
+                                False,
+                                code,
+                                reason,
+                                elapsed_ms,
+                                effective_untrusted,
+                            )
                             return {
                                 "allowed": False,
                                 "reason": reason,
@@ -514,7 +718,16 @@ class LightGuardAgent:
                             self.telemetry.record_action_block()
                         reason = f"Action Approval Required: Tool '{proposed_tool}' requires explicit approval hook which is not configured."
                         code = SecurityReasonCode.LG_TOOL_APPROVAL_REQUIRED
-                        self._log_action_audit(proposed_tool, caller_role, caller_id, False, code, reason, elapsed_ms, effective_untrusted)
+                        self._log_action_audit(
+                            proposed_tool,
+                            caller_role,
+                            caller_id,
+                            False,
+                            code,
+                            reason,
+                            elapsed_ms,
+                            effective_untrusted,
+                        )
                         return {
                             "allowed": False,
                             "reason": reason,
@@ -524,13 +737,24 @@ class LightGuardAgent:
 
         # Mandatory Security Step 1: Verify tool arguments against active Canary tokens
         if self.policy.enable_canary_guard:
-            canary_safe, canary_reason = self.canary.verify_action_arguments(proposed_tool, tool_args)
+            canary_safe, canary_reason = self.canary.verify_action_arguments(
+                proposed_tool, tool_args
+            )
             if not canary_safe:
                 elapsed_ms = (time.perf_counter() - start_t) * 1000.0
                 if self.enable_telemetry and self.telemetry:
                     self.telemetry.record_action_block()
                 code = SecurityReasonCode.LG_CANARY_LEAK
-                self._log_action_audit(proposed_tool, caller_role, caller_id, False, code, canary_reason, elapsed_ms, effective_untrusted)
+                self._log_action_audit(
+                    proposed_tool,
+                    caller_role,
+                    caller_id,
+                    False,
+                    code,
+                    canary_reason,
+                    elapsed_ms,
+                    effective_untrusted,
+                )
                 return {
                     "allowed": False,
                     "reason": canary_reason,
@@ -551,11 +775,23 @@ class LightGuardAgent:
                     self.telemetry.record_action_block()
                 violations = struct_res.get("violations", [])
                 v_lower = " ".join(violations).lower()
-                if "ssrf" in v_lower or "loopback" in v_lower or "169.254" in v_lower or "metadata" in v_lower:
+                if (
+                    "ssrf" in v_lower
+                    or "loopback" in v_lower
+                    or "169.254" in v_lower
+                    or "metadata" in v_lower
+                ):
                     code = SecurityReasonCode.LG_TOOL_SSRF
+                elif "resource_root" in v_lower or "outside" in v_lower:
+                    code = SecurityReasonCode.LG_TOOL_RESOURCE_ROOT_VIOLATION
                 elif "traversal" in v_lower:
                     code = SecurityReasonCode.LG_TOOL_PATH_TRAVERSAL
-                elif "command" in v_lower or "shell" in v_lower or "pipe" in v_lower or "chaining" in v_lower:
+                elif (
+                    "command" in v_lower
+                    or "shell" in v_lower
+                    or "pipe" in v_lower
+                    or "chaining" in v_lower
+                ):
                     code = SecurityReasonCode.LG_TOOL_COMMAND_INJECTION
                 elif "sql" in v_lower:
                     code = SecurityReasonCode.LG_TOOL_SQLI
@@ -565,7 +801,16 @@ class LightGuardAgent:
                     code = SecurityReasonCode.LG_TOOL_ARG_INJECTION
                 violations_str = "; ".join(violations)
                 reason = f"Structured Output Policy Blocked: {violations_str}"
-                self._log_action_audit(proposed_tool, caller_role, caller_id, False, code, reason, elapsed_ms, effective_untrusted)
+                self._log_action_audit(
+                    proposed_tool,
+                    caller_role,
+                    caller_id,
+                    False,
+                    code,
+                    reason,
+                    elapsed_ms,
+                    effective_untrusted,
+                )
                 return {
                     "allowed": False,
                     "reason": reason,
@@ -577,8 +822,22 @@ class LightGuardAgent:
         if proposed_tool in self.policy.whitelisted_tools:
             code = SecurityReasonCode.LG_WHITELISTED
             reason = "Whitelisted tool"
-            self._log_action_audit(proposed_tool, caller_role, caller_id, True, code, reason, 0.001, effective_untrusted)
-            return {"allowed": True, "reason": reason, "reason_code": code.value, "t3_latency_ms": 0.001}
+            self._log_action_audit(
+                proposed_tool,
+                caller_role,
+                caller_id,
+                True,
+                code,
+                reason,
+                0.001,
+                effective_untrusted,
+            )
+            return {
+                "allowed": True,
+                "reason": reason,
+                "reason_code": code.value,
+                "t3_latency_ms": 0.001,
+            }
 
         # Check custom high-stakes tools from policy
         if effective_untrusted and proposed_tool in self.policy.custom_high_stakes_tools:
@@ -587,7 +846,16 @@ class LightGuardAgent:
                 self.telemetry.record_action_block()
             reason = f"Action Firewall Blocked: Tool '{proposed_tool}' is designated as high-stakes by policy."
             code = SecurityReasonCode.LG_TOOL_HIGH_STAKES
-            self._log_action_audit(proposed_tool, caller_role, caller_id, False, code, reason, elapsed_ms, effective_untrusted)
+            self._log_action_audit(
+                proposed_tool,
+                caller_role,
+                caller_id,
+                False,
+                code,
+                reason,
+                elapsed_ms,
+                effective_untrusted,
+            )
             return {
                 "allowed": False,
                 "reason": reason,
@@ -596,11 +864,15 @@ class LightGuardAgent:
             }
 
         # Step 2: Validate against Action Firewall security policies
-        allowed, reason, t3_ms = self.t3.validate_action(proposed_tool, tool_args, effective_untrusted)
+        allowed, reason, t3_ms = self.t3.validate_action(
+            proposed_tool, tool_args, effective_untrusted
+        )
         if not allowed and self.enable_telemetry and self.telemetry:
             self.telemetry.record_action_block()
         code = SecurityReasonCode.LG_ALLOWED if allowed else SecurityReasonCode.LG_TOOL_HIGH_STAKES
-        self._log_action_audit(proposed_tool, caller_role, caller_id, allowed, code, reason, t3_ms, effective_untrusted)
+        self._log_action_audit(
+            proposed_tool, caller_role, caller_id, allowed, code, reason, t3_ms, effective_untrusted
+        )
 
         return {
             "allowed": allowed,
@@ -608,4 +880,3 @@ class LightGuardAgent:
             "reason_code": code.value,
             "t3_latency_ms": t3_ms,
         }
-

@@ -49,19 +49,26 @@ class LightGuardStreamWrapper:
         chunk = next(self._stream)
         text_piece = ""
         try:
-            # 1. Standard OpenAI/Groq streaming chunk format
+            # 1. Standard OpenAI/Groq streaming chunk format (inspecting ALL choices)
             if hasattr(chunk, "choices") and chunk.choices:
-                delta = chunk.choices[0].delta
-                text_piece = getattr(delta, "content", "") or ""
-                tcs = getattr(delta, "tool_calls", None)
-                if tcs:
-                    self._process_tool_call_deltas(tcs)
+                for choice in chunk.choices:
+                    delta = getattr(choice, "delta", None)
+                    if delta:
+                        c_text = getattr(delta, "content", "") or ""
+                        if c_text:
+                            text_piece += c_text
+                        tcs = getattr(delta, "tool_calls", None)
+                        if tcs:
+                            self._process_tool_call_deltas(tcs)
             elif isinstance(chunk, dict) and "choices" in chunk:
-                delta = chunk["choices"][0].get("delta", {})
-                text_piece = delta.get("content", "")
-                tcs = delta.get("tool_calls")
-                if tcs:
-                    self._process_tool_call_deltas(tcs)
+                for choice in chunk["choices"]:
+                    delta = choice.get("delta", {}) if isinstance(choice, dict) else getattr(choice, "delta", {})
+                    c_text = delta.get("content", "") if isinstance(delta, dict) else getattr(delta, "content", "")
+                    if c_text:
+                        text_piece += c_text
+                    tcs = delta.get("tool_calls") if isinstance(delta, dict) else getattr(delta, "tool_calls", None)
+                    if tcs:
+                        self._process_tool_call_deltas(tcs)
             # 2. Anthropic streaming event format (content_block_start, content_block_delta, content_block_stop)
             elif hasattr(chunk, "type") or (isinstance(chunk, dict) and "type" in chunk):
                 chunk_type = getattr(chunk, "type", "") if hasattr(chunk, "type") else chunk.get("type", "")
@@ -82,10 +89,10 @@ class LightGuardStreamWrapper:
         if text_piece:
             self._accumulated_content.append(text_piece)
             full_text = "".join(self._accumulated_content)
-            is_leaked, token = self._guard.canary.check_leakage(full_text)
+            is_leaked, _ = self._guard.canary.check_leakage(full_text)
             if is_leaked and self._block:
                 raise SecurityViolationError(
-                    f"LightGuard Security Block: Stream intercepted due to secret canary token leakage ({token})."
+                    "LightGuard Security Block: Stream intercepted due to confidential canary token leakage."
                 )
 
         return chunk
@@ -127,12 +134,14 @@ class LightGuardStreamWrapper:
             tool_id = getattr(cb, "id", "") if hasattr(cb, "id") else cb.get("id", "")
             self._tool_calls_accumulator[idx] = {"name": name, "arguments": "", "id": tool_id}
             if name:
-                act_res = self._guard.verify_action(
-                    name, {"id": tool_id}, is_untrusted=self._is_untrusted
-                )
-                if not act_res["allowed"] and self._block:
+                # Pre-validate tool name on start without validating parameter schema until arguments arrive
+                if name in self._guard.policy.denied_tools and self._block:
                     raise SecurityViolationError(
-                        f"LightGuard Action Firewall Block in Anthropic stream: {act_res['reason']}"
+                        f"LightGuard Action Firewall Block in Anthropic stream: Tool '{name}' is explicitly denied."
+                    )
+                if self._guard.policy.allowed_tools and name not in self._guard.policy.allowed_tools and self._block:
+                    raise SecurityViolationError(
+                        f"LightGuard Action Firewall Block in Anthropic stream: Tool '{name}' is not in allowed_tools."
                     )
 
     def _process_anthropic_block_delta(self, chunk: Any) -> str:
@@ -149,10 +158,10 @@ class LightGuardStreamWrapper:
                 self._tool_calls_accumulator[idx] = {"name": "", "arguments": "", "id": ""}
             self._tool_calls_accumulator[idx]["arguments"] += partial_json
             if self._guard.policy.enable_canary_guard and partial_json:
-                is_leaked, token = self._guard.canary.check_leakage(partial_json)
+                is_leaked, _ = self._guard.canary.check_leakage(partial_json)
                 if is_leaked and self._block:
                     raise SecurityViolationError(
-                        f"LightGuard Security Block: Stream intercepted due to secret canary token leakage ({token})."
+                        "LightGuard Security Block: Stream intercepted due to confidential canary token leakage."
                     )
             return ""
         elif d_type == "text_delta" or hasattr(delta, "text") or (isinstance(delta, dict) and "text" in delta):
@@ -191,6 +200,7 @@ class LightGuardAsyncStreamWrapper:
         self._guard = guard
         self._block = block_on_violation
         self._is_untrusted = is_untrusted
+        self._accumulated_content: list[str] = []
         self._tool_calls_accumulator: dict[int, dict[str, str]] = {}
 
     def __aiter__(self) -> Any:
@@ -203,45 +213,47 @@ class LightGuardAsyncStreamWrapper:
         # 1. Standard OpenAI streaming chunk format
         choices = getattr(chunk, "choices", None)
         if choices and len(choices) > 0:
-            choice = choices[0]
-            delta = getattr(choice, "delta", None)
-            if delta:
-                content = getattr(delta, "content", None)
-                if content:
-                    is_leaked, token = self._guard.canary.check_leakage(content)
-                    if is_leaked and self._block:
-                        raise SecurityViolationError(
-                            f"LightGuard Security Block in async stream: Output leaked confidential canary token ({token})."
-                        )
-                tool_calls = getattr(delta, "tool_calls", None)
-                if tool_calls:
-                    for tc in tool_calls:
-                        idx = getattr(tc, "index", 0)
-                        if idx not in self._tool_calls_accumulator:
-                            self._tool_calls_accumulator[idx] = {"name": "", "arguments": ""}
-                        func = getattr(tc, "function", None)
-                        if func:
-                            if getattr(func, "name", None):
-                                self._tool_calls_accumulator[idx]["name"] = func.name
-                            if getattr(func, "arguments", None):
-                                self._tool_calls_accumulator[idx]["arguments"] += func.arguments
-
-            finish_reason = getattr(choice, "finish_reason", None)
-            if finish_reason in ("tool_calls", "function_call", "stop") and self._tool_calls_accumulator:
-                for idx, tc_data in list(self._tool_calls_accumulator.items()):
-                    fn_name = tc_data.get("name", "")
-                    if fn_name:
-                        parsed_args = _unmarshal_tool_args(tc_data.get("arguments", ""))
-                        act_res = self._guard.verify_action(
-                            fn_name,
-                            parsed_args,
-                            is_untrusted=self._is_untrusted,
-                        )
-                        if not act_res["allowed"] and self._block:
+            for choice in choices:
+                delta = getattr(choice, "delta", None)
+                if delta:
+                    content = getattr(delta, "content", None)
+                    if content:
+                        self._accumulated_content.append(content)
+                        full_text = "".join(self._accumulated_content)
+                        is_leaked, _ = self._guard.canary.check_leakage(full_text)
+                        if is_leaked and self._block:
                             raise SecurityViolationError(
-                                f"LightGuard Action Firewall Block in async stream: {act_res['reason']}"
+                                "LightGuard Security Block in async stream: Output leaked confidential canary token."
                             )
-                self._tool_calls_accumulator.clear()
+                    tool_calls = getattr(delta, "tool_calls", None)
+                    if tool_calls:
+                        for tc in tool_calls:
+                            idx = getattr(tc, "index", 0)
+                            if idx not in self._tool_calls_accumulator:
+                                self._tool_calls_accumulator[idx] = {"name": "", "arguments": ""}
+                            func = getattr(tc, "function", None)
+                            if func:
+                                if getattr(func, "name", None):
+                                    self._tool_calls_accumulator[idx]["name"] = func.name
+                                if getattr(func, "arguments", None):
+                                    self._tool_calls_accumulator[idx]["arguments"] += func.arguments
+
+                finish_reason = getattr(choice, "finish_reason", None)
+                if finish_reason in ("tool_calls", "function_call", "stop") and self._tool_calls_accumulator:
+                    for idx, tc_data in list(self._tool_calls_accumulator.items()):
+                        fn_name = tc_data.get("name", "")
+                        if fn_name:
+                            parsed_args = _unmarshal_tool_args(tc_data.get("arguments", ""))
+                            act_res = self._guard.verify_action(
+                                fn_name,
+                                parsed_args,
+                                is_untrusted=self._is_untrusted,
+                            )
+                            if not act_res["allowed"] and self._block:
+                                raise SecurityViolationError(
+                                    f"LightGuard Action Firewall Block in async stream: {act_res['reason']}"
+                                )
+                    self._tool_calls_accumulator.clear()
 
         # 2. Anthropic streaming chunk format
         c_type = getattr(chunk, "type", None)
@@ -252,10 +264,12 @@ class LightGuardAsyncStreamWrapper:
                 if d_type == "text_delta":
                     text_val = getattr(c_delta, "text", "")
                     if text_val:
-                        is_leaked, token = self._guard.canary.check_leakage(text_val)
+                        self._accumulated_content.append(text_val)
+                        full_text = "".join(self._accumulated_content)
+                        is_leaked, _ = self._guard.canary.check_leakage(full_text)
                         if is_leaked and self._block:
                             raise SecurityViolationError(
-                                f"LightGuard Security Block in async Anthropic stream: Output leaked confidential canary token ({token})."
+                                "LightGuard Security Block in async Anthropic stream: Output leaked confidential canary token."
                             )
                 elif d_type == "input_json_delta":
                     idx = getattr(chunk, "index", 0)
@@ -300,10 +314,10 @@ class LightGuardChatCompletionsProxy:
                 msg = result.choices[0].message
                 content = getattr(msg, "content", "") or ""
                 if content:
-                    is_leaked, token = self._guard.canary.check_leakage(content)
+                    is_leaked, _ = self._guard.canary.check_leakage(content)
                     if is_leaked and self._block:
                         raise SecurityViolationError(
-                            f"LightGuard Security Block: Output leaked confidential canary token ({token})."
+                            "LightGuard Security Block: Output leaked confidential canary token."
                         )
                 tool_calls = getattr(msg, "tool_calls", None)
                 if tool_calls:
@@ -400,10 +414,10 @@ class LightGuardMessagesProxy:
                     if b_type == "text":
                         text_val = getattr(block, "text", "") if hasattr(block, "text") else block.get("text", "")
                         if text_val:
-                            is_leaked, token = self._guard.canary.check_leakage(text_val)
+                            is_leaked, _ = self._guard.canary.check_leakage(text_val)
                             if is_leaked and self._block:
                                 raise SecurityViolationError(
-                                    f"LightGuard Security Block: Output leaked confidential canary token ({token})."
+                                    "LightGuard Security Block: Output leaked confidential canary token."
                                 )
                     elif b_type == "tool_use":
                         fn_name = getattr(block, "name", "") if hasattr(block, "name") else block.get("name", "")
@@ -539,10 +553,10 @@ class LightGuardChatProxy:
             msg = result.get("message", {})
             content = msg.get("content", "") if isinstance(msg, dict) else ""
             if content:
-                is_leaked, token = self._guard.canary.check_leakage(content)
+                is_leaked, _ = self._guard.canary.check_leakage(content)
                 if is_leaked and self._block:
                     raise SecurityViolationError(
-                        f"LightGuard Security Block: Output leaked confidential canary token ({token})."
+                        "LightGuard Security Block: Output leaked confidential canary token."
                     )
             tool_calls = msg.get("tool_calls", []) if isinstance(msg, dict) else []
             if tool_calls and isinstance(tool_calls, list):

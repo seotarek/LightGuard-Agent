@@ -27,7 +27,10 @@ class LightGuardMCPProxy:
         self.has_untrusted_observation = False
 
     def intercept_request(
-        self, tool_name: str, arguments: dict[str, Any]
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        context: Optional[Any] = None,
     ) -> dict[str, Any]:
         """Validate an outgoing MCP tool call before execution.
 
@@ -38,6 +41,7 @@ class LightGuardMCPProxy:
             proposed_tool=tool_name,
             tool_args=arguments,
             is_untrusted=self.has_untrusted_observation,
+            context=context,
         )
 
         if not verif["allowed"]:

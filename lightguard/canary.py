@@ -56,6 +56,8 @@ class CanaryGuard:
         self._prune_expired()
         return token
 
+    issue_token = generate_canary
+
     @property
     def active_canaries_count(self) -> int:
         return len(self._active_canaries)
