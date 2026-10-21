@@ -48,6 +48,10 @@ nav:
   - Multimodal & Metadata Shield: multimodal.md
   - Structured Output Guard: structured.md
   - Executive Compliance Report: reporting.md
+  - Local Web Dashboard: dashboard.md
+  - Fast Pattern Matcher & GCG: fast_matcher.md
+  - Threat Intel Registry: threat_intel.md
+  - AsyncIO Core Engine: async.md
   - Security Policies: policy.md
   - Telemetry & Observability: telemetry.md
   - Universal Wrapper & Middleware: wrapper.md

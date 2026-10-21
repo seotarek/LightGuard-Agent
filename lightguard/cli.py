@@ -203,6 +203,11 @@ def main() -> None:
     subparsers.add_parser("audit", help="Run automated adversarial red-team penetration audit")
     subparsers.add_parser("redteam", help="Alias for audit")
 
+    # dashboard
+    dash_p = subparsers.add_parser("dashboard", help="Launch local offline web control center")
+    dash_p.add_argument("--host", default="127.0.0.1", help="Host address to bind")
+    dash_p.add_argument("--port", "-p", type=int, default=8443, help="Port to bind dashboard server")
+
     # benchmark
     subparsers.add_parser("benchmark", help="Run empirical benchmark suite")
 
@@ -218,6 +223,7 @@ def main() -> None:
         "metrics": cmd_metrics,
         "report": cmd_report,
         "mcp-gateway": cmd_mcp_gateway,
+        "dashboard": lambda a: __import__("lightguard.dashboard", fromlist=["run_dashboard"]).run_dashboard(host=a.host, port=a.port) or 0,
         "audit": cmd_audit,
         "redteam": cmd_audit,
         "benchmark": cmd_benchmark,
