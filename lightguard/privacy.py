@@ -1,7 +1,63 @@
 import dataclasses
 import re
 import time
-from typing import ClassVar
+from typing import Any, ClassVar
+
+
+class RedactionResult(tuple):
+    """Hybrid result container for DLP & PII redaction.
+
+    Supports:
+    1. Tuple unpacking: `cleaned, mapping, ms = guard.redact(text)`
+    2. Dict item access: `res['redacted_text']`, `res['entities_found']`, `res['latency_ms']`, `res['entity_map']`
+    3. Attribute access: `res.redacted_text`, `res.entity_map`, `res.latency_ms`, `res.entities_found`
+    """
+
+    def __new__(cls, redacted_text: str, entity_map: dict[str, str], latency_ms: float):
+        return super().__new__(cls, (redacted_text, entity_map, latency_ms))
+
+    @property
+    def redacted_text(self) -> str:
+        return self[0]
+
+    @property
+    def entity_map(self) -> dict[str, str]:
+        return self[1]
+
+    @property
+    def latency_ms(self) -> float:
+        return self[2]
+
+    @property
+    def entities_found(self) -> int:
+        return len(self[1])
+
+    def __getitem__(self, item: Any) -> Any:
+        if isinstance(item, str):
+            if item == "redacted_text":
+                return self[0]
+            elif item in ("entity_map", "entities", "mapping"):
+                return self[1]
+            elif item in ("latency_ms", "elapsed_ms"):
+                return self[2]
+            elif item == "entities_found":
+                return len(self[1])
+            raise KeyError(f"RedactionResult has no key '{item}'")
+        return super().__getitem__(item)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "redacted_text": self[0],
+            "entity_map": self[1],
+            "entities_found": len(self[1]),
+            "latency_ms": self[2],
+        }
 
 
 @dataclasses.dataclass
@@ -109,17 +165,17 @@ class PrivacyGuard:
         return results
 
     @classmethod
-    def redact(cls, text: str, reversible: bool = True) -> tuple[str, dict[str, str], float]:
+    def redact(cls, text: str, reversible: bool = True) -> RedactionResult:
         """
         Redacts all credentials and PII.
         If reversible=True, provides a token substitution mapping to restore the data later.
-        Returns: (sanitized_text, reverse_mapping, elapsed_ms).
+        Returns a RedactionResult (tuple of sanitized_text, reverse_mapping, elapsed_ms, supporting dict and attribute access).
         """
         start_t = time.perf_counter()
         detections = cls.scan(text)
         if not detections:
             elapsed_ms = (time.perf_counter() - start_t) * 1000.0
-            return text, {}, elapsed_ms
+            return RedactionResult(text, {}, elapsed_ms)
 
         # Filter overlapping detections: prioritize earlier start and longer span
         sorted_by_span = sorted(detections, key=lambda d: (d.start_index, -(d.end_index - d.start_index)))
@@ -149,7 +205,7 @@ class PrivacyGuard:
                 mapping[placeholder] = item.original_value
 
         elapsed_ms = (time.perf_counter() - start_t) * 1000.0
-        return cleaned, mapping, elapsed_ms
+        return RedactionResult(cleaned, mapping, elapsed_ms)
 
     @staticmethod
     def restore(redacted_text: str, mapping: dict[str, str]) -> str:

@@ -17,6 +17,30 @@ class SanitizedChunk:
     latency_ms: float
 
 
+class FencedContextResult(tuple):
+    """Hybrid result container for RAG fenced context.
+
+    Supports:
+    1. Tuple unpacking: `context_str, evaluated_chunks = shield.build_fenced_context(...)`
+    2. Direct string representation: `print(safe_context)` or `str(safe_context)`
+    3. Attribute access: `safe_context.fenced_context`, `safe_context.evaluated`
+    """
+
+    def __new__(cls, fenced_context: str, evaluated: list[SanitizedChunk]):
+        return super().__new__(cls, (fenced_context, evaluated))
+
+    @property
+    def fenced_context(self) -> str:
+        return self[0]
+
+    @property
+    def evaluated(self) -> list[SanitizedChunk]:
+        return self[1]
+
+    def __str__(self) -> str:
+        return self[0]
+
+
 class RAGContextShield:
     """
     RAG & Knowledge Base Context Poisoning Shield.
@@ -29,10 +53,29 @@ class RAGContextShield:
         self.guard = guard if guard is not None else LightGuardAgent()
         self.canary = canary_guard if canary_guard is not None else CanaryGuard()
 
-    def sanitize_chunk(self, chunk_text: str, index: int = 0) -> SanitizedChunk:
-        """Evaluates a single retrieved document chunk for adversarial directives."""
+    def sanitize_chunk(self, chunk: Any, index: int = 0) -> SanitizedChunk:
+        """Evaluates a single retrieved document chunk (str, dict, or Document object) for adversarial directives."""
         start_t = time.perf_counter()
-        obs = self.guard.process_observation(chunk_text)
+
+        # Extract text content from str, dict, or doc objects
+        if isinstance(chunk, str):
+            raw_text = chunk
+        elif isinstance(chunk, dict):
+            raw_text = (
+                chunk.get("text")
+                or chunk.get("content")
+                or chunk.get("page_content")
+                or chunk.get("body")
+                or str(chunk)
+            )
+        elif hasattr(chunk, "page_content"):
+            raw_text = str(chunk.page_content)
+        elif hasattr(chunk, "text"):
+            raw_text = str(chunk.text)
+        else:
+            raw_text = str(chunk)
+
+        obs = self.guard.process_observation(raw_text)
 
         threats = []
         if obs["t1_flagged"]:
@@ -48,7 +91,7 @@ class RAGContextShield:
 
         return SanitizedChunk(
             chunk_index=index,
-            original_text=chunk_text,
+            original_text=raw_text,
             sanitized_text=obs["sanitized_observation"],
             is_poisoned=obs["is_untrusted"],
             risk_score=obs["t2_risk_score"],
@@ -56,16 +99,16 @@ class RAGContextShield:
             latency_ms=elapsed_ms,
         )
 
-    def sanitize_chunks(self, chunks: list[str]) -> list[SanitizedChunk]:
+    def sanitize_chunks(self, chunks: list[Any]) -> list[SanitizedChunk]:
         """Evaluates a list of retrieved document chunks in bulk."""
         return [self.sanitize_chunk(c, i) for i, c in enumerate(chunks)]
 
     def build_fenced_context(
         self,
-        chunks: list[str],
+        chunks: list[Any],
         query: str = "",
         drop_poisoned: bool = True,
-    ) -> tuple[str, list[SanitizedChunk]]:
+    ) -> FencedContextResult:
         """
         Processes retrieved RAG chunks, strips or neutralizes poisoned items,
         and constructs a tamper-proof cryptographically bounded context block.
@@ -95,7 +138,7 @@ class RAGContextShield:
             f"<!-- END_LG_RAG_CONTEXT_{nonce} -->"
         )
 
-        return fenced_context, evaluated
+        return FencedContextResult(fenced_context, evaluated)
 
     def protect_retriever(self, retriever: Any, drop_poisoned: bool = True) -> Any:
         """

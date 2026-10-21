@@ -18,21 +18,47 @@ class CanaryGuard:
     canary leakage, and delimiter forgery in agent completions and tool calls.
     """
 
-    def __init__(self, secret_key: Optional[str] = None):
+    def __init__(
+        self,
+        secret_key: Optional[str] = None,
+        max_canaries: int = 5000,
+        ttl_seconds: float = 3600.0,
+    ):
         self._secret = (
             secret_key.encode("utf-8")
             if secret_key
             else secrets.token_bytes(32)
         )
-        self._active_canaries: set[str] = set()
+        self._active_canaries: dict[str, float] = {}
+        self._max_canaries = max_canaries
+        self._ttl_seconds = ttl_seconds
+
+    def _prune_expired(self) -> None:
+        """Removes expired canary tokens and enforces the max_canaries capacity limit."""
+        now = time.time()
+        if self._ttl_seconds > 0:
+            self._active_canaries = {
+                t: ts for t, ts in self._active_canaries.items()
+                if (now - ts) < self._ttl_seconds
+            }
+        if len(self._active_canaries) > self._max_canaries:
+            # Evict oldest entries
+            sorted_items = sorted(self._active_canaries.items(), key=lambda x: x[1])
+            self._active_canaries = dict(sorted_items[-self._max_canaries:])
 
     def generate_canary(self, label: str = "sys") -> str:
-        """Generates a secure, unpredictable canary token."""
+        """Generates a secure, unpredictable canary token with bounded memory retention."""
+        now = time.time()
         salt = secrets.token_hex(8)
-        mac = hmac.new(self._secret, f"{label}:{salt}:{time.time()}".encode("utf-8"), hashlib.sha256).hexdigest()[:16]
+        mac = hmac.new(self._secret, f"{label}:{salt}:{now}".encode("utf-8"), hashlib.sha256).hexdigest()[:16]
         token = f"LG-CANARY-{label.upper()}-{mac}"
-        self._active_canaries.add(token)
+        self._active_canaries[token] = now
+        self._prune_expired()
         return token
+
+    @property
+    def active_canaries_count(self) -> int:
+        return len(self._active_canaries)
 
     def wrap_system_prompt(self, system_prompt: str, canary: Optional[str] = None) -> tuple[str, str]:
         """

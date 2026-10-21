@@ -17,22 +17,27 @@ class Tier1SyntacticSanitizer:
     """
 
     KNOWN_INJECTION_PATTERNS: ClassVar[list[re.Pattern]] = [
-        re.compile(r"(?i)\bignore\s+(all\s+)?(previous|prior|above)\s+instructions\b"),
-        re.compile(r"(?i)\bdisregard\s+(the\s+)?(system|previous|prior)\s+(prompt|instructions)\b"),
+        re.compile(r"(?i)\bignore\s+(all\s+)?(previous|prior|above)\s+(instructions|constraints|rules|directives|prompts)\b"),
+        re.compile(r"(?i)\bdisregard\s+(all\s+|the\s+)?(system|previous|prior)\s+(prompt|instructions|rules|constraints)\b"),
         re.compile(r"(?i)\byou\s+are\s+now\s+(a\s+)?new\s+(ai|assistant|model)\b"),
         re.compile(r"(?i)\bsystem\s*:\s*override\b"),
-        re.compile(r"(?i)\bpriority\s+command\s*:\s*\b"),
+        re.compile(r"(?i)\b(priority|override)\s+(command|directive|instruction)\s*:\s*\b"),
         re.compile(r"(?i)\bprint\s+(all\s+)?(hidden|secret|api|key|environment|developer)\b"),
-        re.compile(r"(?i)\bforward\s+(all\s+)?(data|secrets|messages|credentials)\b"),
+        re.compile(r"(?i)\b(output|reveal|dump)\s+(your\s+)?(entire\s+)?(secret\s+)?(system\s+)?(prompt|instructions|keys|tokens)\b"),
+        re.compile(r"(?i)\b(forward|exfiltrate|leak)\s+(all\s+)?(system\s+)?(data|secrets|messages|credentials|tokens|keys)\b"),
         re.compile(r"(?i)\bexecute\s+command\s*:\s*\b"),
         re.compile(r"(?i)\badmin\s+mode\s+enabled\b"),
-        re.compile(r"(?i)\b(exec_bash|drop_table|delete_file|execute_sql|transfer_funds)\s*\("),
+        re.compile(r"(?i)\b(exec_bash|drop_table|delete_file|execute_sql|transfer_funds|delete_database|drop_database)\s*(\(|=)"),
     ]
 
     DELIMITER_TAGS: ClassVar[list[tuple[str, str]]] = [
         ("```system", "```escaped_system"),
         ("<system>", "&lt;system&gt;"),
         ("</system>", "&lt;/system&gt;"),
+        ("<!-- system", "&lt;!-- escaped_system"),
+        ("<!--system", "&lt;!--escaped_system"),
+        ("<user_input>", "&lt;user_input&gt;"),
+        ("</user_input>", "&lt;/user_input&gt;"),
         ("<im_start>", "&lt;im_start&gt;"),
         ("<im_end>", "&lt;im_end&gt;"),
     ]
@@ -215,10 +220,24 @@ class LightGuardAgent:
                 t1_flagged = True
                 risk_score = 1.0
 
+        # Recursively inspect hidden payloads decoded from steganography
+        if t0_res.get("decoded_payloads"):
+            for payload in t0_res["decoded_payloads"]:
+                _, sub_t1, _ = self.t1.sanitize(payload)
+                sub_risk, _, _ = self.t2.analyze(payload)
+                p_lower = payload.lower()
+                if (
+                    sub_t1
+                    or sub_risk >= 0.35
+                    or any(w in p_lower for w in ["ignore", "disregard", "override", "system", "prompt", "exec", "drop"])
+                ):
+                    t1_flagged = True
+                    risk_score = max(risk_score, 0.90)
+
         is_untrusted = (
             t1_flagged
             or (risk_score >= self.policy.risk_threshold)
-            or t0_res["was_obfuscated"]
+            or canary_leaked
         )
 
         total_ms = t0_res["elapsed_ms"] + t1_ms + t2_ms
@@ -232,7 +251,7 @@ class LightGuardAgent:
             )
 
         threat_categories: list[str] = []
-        if t0_res["was_obfuscated"]:
+        if is_untrusted and t0_res["was_obfuscated"]:
             threat_categories.append("Obfuscation / Steganography")
         if t1_flagged:
             threat_categories.append("Syntactic Directive Neutralized")
@@ -273,6 +292,28 @@ class LightGuardAgent:
         # Whitelist override
         if proposed_tool in self.policy.whitelisted_tools:
             return {"allowed": True, "reason": "Whitelisted tool", "t3_latency_ms": 0.001}
+
+        # Authorization Rule 1: Explicit Denylist (Unconditional block)
+        if proposed_tool in self.policy.denied_tools:
+            elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+            if self.enable_telemetry and self.telemetry:
+                self.telemetry.record_action_block()
+            return {
+                "allowed": False,
+                "reason": f"Authorization Policy Blocked: Tool '{proposed_tool}' is explicitly denied by policy.",
+                "t3_latency_ms": elapsed_ms,
+            }
+
+        # Authorization Rule 2: Explicit Allowlist (Default-Deny least privilege)
+        if self.policy.allowed_tools and proposed_tool not in self.policy.allowed_tools:
+            elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+            if self.enable_telemetry and self.telemetry:
+                self.telemetry.record_action_block()
+            return {
+                "allowed": False,
+                "reason": f"Authorization Policy Blocked: Tool '{proposed_tool}' is not in allowed_tools (default-deny policy).",
+                "t3_latency_ms": elapsed_ms,
+            }
 
         # Step 1: Verify tool arguments against active Canary tokens
         if self.policy.enable_canary_guard:

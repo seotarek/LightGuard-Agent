@@ -30,13 +30,21 @@ class MCPSecurityGateway:
         except Exception:
             return True, raw_message
 
+        # Safely handle non-dict JSON (e.g. JSON arrays or primitives)
+        if not isinstance(req, dict):
+            return True, raw_message
+
         method = req.get("method", "")
         req_id = req.get("id")
 
         if method == "tools/call":
-            params = req.get("params", {})
+            params = req.get("params")
+            if not isinstance(params, dict):
+                params = {}
             tool_name = params.get("name", "")
-            tool_args = params.get("arguments", {})
+            tool_args = params.get("arguments")
+            if not isinstance(tool_args, dict):
+                tool_args = {}
 
             validation = self.proxy.intercept_request(
                 tool_name=tool_name,
@@ -70,28 +78,76 @@ class MCPSecurityGateway:
         except Exception:
             return True, raw_message
 
+        if not isinstance(resp, dict):
+            return True, raw_message
+
         result = resp.get("result")
         if not isinstance(result, dict):
             return True, raw_message
 
-        # Handle tool execution contents
-        content_items = result.get("content", [])
         modified = False
 
+        # 1. Standard tool execution content: result.content
+        content_items = result.get("content")
         if isinstance(content_items, list):
             for item in content_items:
-                if isinstance(item, dict) and item.get("type") == "text":
-                    raw_text = item.get("text", "")
-                    obs = self.guard.process_observation(raw_text)
+                if isinstance(item, dict):
+                    if item.get("type") == "text" and isinstance(item.get("text"), str):
+                        raw_text = item["text"]
+                        obs = self.guard.process_observation(raw_text)
+                        if obs["is_untrusted"]:
+                            item["text"] = obs["sanitized_observation"]
+                            modified = True
+                            self.proxy.session_is_untrusted = True
+                    elif item.get("type") == "resource" and isinstance(item.get("resource"), dict):
+                        res_obj = item["resource"]
+                        if isinstance(res_obj.get("text"), str):
+                            obs = self.guard.process_observation(res_obj["text"])
+                            if obs["is_untrusted"]:
+                                res_obj["text"] = obs["sanitized_observation"]
+                                modified = True
+                                self.proxy.session_is_untrusted = True
+
+        # 2. Resource read results: result.contents (from resources/read)
+        contents_items = result.get("contents")
+        if isinstance(contents_items, list):
+            for item in contents_items:
+                if isinstance(item, dict) and isinstance(item.get("text"), str):
+                    obs = self.guard.process_observation(item["text"])
                     if obs["is_untrusted"]:
                         item["text"] = obs["sanitized_observation"]
                         modified = True
                         self.proxy.session_is_untrusted = True
 
+        # 3. Prompt messages: result.messages (from prompts/get)
+        messages_items = result.get("messages")
+        if isinstance(messages_items, list):
+            for msg in messages_items:
+                if isinstance(msg, dict):
+                    msg_content = msg.get("content")
+                    if isinstance(msg_content, str):
+                        obs = self.guard.process_observation(msg_content)
+                        if obs["is_untrusted"]:
+                            msg["content"] = obs["sanitized_observation"]
+                            modified = True
+                            self.proxy.session_is_untrusted = True
+                    elif isinstance(msg_content, dict) and msg_content.get("type") == "text":
+                        raw_text = msg_content.get("text", "")
+                        if isinstance(raw_text, str):
+                            obs = self.guard.process_observation(raw_text)
+                            if obs["is_untrusted"]:
+                                msg_content["text"] = obs["sanitized_observation"]
+                                modified = True
+                                self.proxy.session_is_untrusted = True
+
         if modified:
             return False, json.dumps(resp)
 
         return True, raw_message
+
+    def reset_session(self) -> None:
+        """Reset the internal security proxy untrusted context state."""
+        self.proxy.reset_session()
 
 
 def run_stdio_gateway(upstream_cmd: list[str]) -> None:
@@ -111,9 +167,12 @@ def run_stdio_gateway(upstream_cmd: list[str]) -> None:
     )
 
     def forward_stdin():
-        try:
-            for line in sys.stdin:
-                allowed, out = gateway.process_client_to_server(line.strip())
+        for line in sys.stdin:
+            try:
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                allowed, out = gateway.process_client_to_server(line_str)
                 if allowed:
                     if proc.stdin:
                         proc.stdin.write(out + "\n")
@@ -122,18 +181,24 @@ def run_stdio_gateway(upstream_cmd: list[str]) -> None:
                     # Echo error back directly to client stdout
                     sys.stdout.write(out + "\n")
                     sys.stdout.flush()
-        except Exception:
-            pass
+            except Exception as e:
+                sys.stderr.write(f"[LightGuard MCP] Inbound framing error: {e}\n")
+                sys.stderr.flush()
 
     def forward_stdout():
-        try:
-            if proc.stdout:
-                for line in proc.stdout:
-                    _, out = gateway.process_server_to_client(line.strip())
-                    sys.stdout.write(out + "\n")
-                    sys.stdout.flush()
-        except Exception:
-            pass
+        if not proc.stdout:
+            return
+        for line in proc.stdout:
+            try:
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                _, out = gateway.process_server_to_client(line_str)
+                sys.stdout.write(out + "\n")
+                sys.stdout.flush()
+            except Exception as e:
+                sys.stderr.write(f"[LightGuard MCP] Outbound framing error: {e}\n")
+                sys.stderr.flush()
 
     t_in = threading.Thread(target=forward_stdin, daemon=True)
     t_out = threading.Thread(target=forward_stdout, daemon=True)

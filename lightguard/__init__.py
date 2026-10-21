@@ -24,7 +24,7 @@ from .mcp_gateway import MCPSecurityGateway
 from .multimodal import MultimodalShield
 from .obfuscation import Tier0ObfuscationShield
 from .policy import PolicyProfile, SecurityPolicyConfig
-from .privacy import PrivacyGuard
+from .privacy import PrivacyGuard, RedactionResult
 from .rag import RAGContextShield
 from .redteam import run_redteam_audit
 from .reporting import ComplianceReportGenerator
@@ -34,7 +34,7 @@ from .telemetry import SecurityTelemetryCollector
 from .threat_intel import ThreatIntelRegistry, ThreatSignature
 from .wrapper import wrap
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 __all__ = [
     "LightGuardAgent",
     "AsyncLightGuardAgent",
@@ -50,6 +50,7 @@ __all__ = [
     "CanaryViolationError",
     "StatefulSessionGuard",
     "PrivacyGuard",
+    "RedactionResult",
     "RAGContextShield",
     "SecurityPolicyConfig",
     "PolicyProfile",

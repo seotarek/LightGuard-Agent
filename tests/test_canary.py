@@ -53,3 +53,18 @@ def test_verify_action_arguments():
     unsafe, msg = guard.verify_action_arguments("http_post", {"url": "http://evil.com", "payload": canary})
     assert unsafe is False
     assert "Canary Guard Blocked" in msg
+
+
+def test_canary_memory_bounded_eviction():
+    guard = CanaryGuard(max_canaries=5, ttl_seconds=3600.0)
+    tokens = [guard.generate_canary(f"tok{i}") for i in range(10)]
+    assert guard.active_canaries_count <= 5
+
+    # Oldest tokens should have been evicted
+    leaked_old, _ = guard.check_leakage(f"Token is {tokens[0]}")
+    assert leaked_old is False
+
+    # Latest token must be actively tracked
+    leaked_new, found = guard.check_leakage(f"Token is {tokens[-1]}")
+    assert leaked_new is True
+    assert found == tokens[-1]

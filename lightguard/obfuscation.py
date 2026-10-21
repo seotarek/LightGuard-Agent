@@ -32,6 +32,8 @@ class Tier0ObfuscationShield:
         "α": "a", "ο": "o", "ν": "v", "ρ": "p", "τ": "t", "ι": "i", "κ": "k",
         "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H", "Ι": "I", "Κ": "K",
         "Μ": "M", "Ν": "N", "Ο": "O", "Ρ": "P", "Τ": "T", "Χ": "X",
+        # Armenian visual lookalikes
+        "ց": "g", "ո": "n", "օ": "o", "ս": "u", "հ": "h", "զ": "q", "ւ": "w",
     }
 
     # Leetspeak common substitutions

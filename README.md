@@ -11,7 +11,8 @@
 [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Live%20Playground-yellow)](https://huggingface.co/spaces/seotarek/LightGuard-Agent)
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://seotarek.github.io/LightGuard-Agent/)
 [![CI](https://github.com/seotarek/LightGuard-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/seotarek/LightGuard-Agent/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-92%2F92%20passed%20(100%25)-success.svg)](https://github.com/seotarek/LightGuard-Agent/actions)
+[![Tests](https://img.shields.io/badge/tests-101%2F101%20passed-success.svg)](https://github.com/seotarek/LightGuard-Agent/actions)
+[![Coverage](https://img.shields.io/badge/coverage-81%25%20(core%2094%25)-brightgreen.svg)](https://github.com/seotarek/LightGuard-Agent/actions)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0%20external-purple.svg)](https://pypi.org/project/lightguard-agent/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -20,7 +21,7 @@
   <a href="https://seotarek.github.io/LightGuard-Agent/"><b>📚 Documentation</b></a> •
   <a href="https://huggingface.co/spaces/seotarek/LightGuard-Agent"><b>🤗 Live Playground</b></a> •
   <a href="https://doi.org/10.5281/zenodo.22731104"><b>📄 Research Paper</b></a> •
-  <a href="https://github.com/seotarek/LightGuard-Agent/releases/tag/v0.6.0"><b>🚀 Release v0.6.0</b></a>
+  <a href="https://github.com/seotarek/LightGuard-Agent/releases/tag/v0.6.1"><b>🚀 Release v0.6.1</b></a>
 </p>
 
 </div>
@@ -120,9 +121,9 @@ Evaluated across standardized adversarial corpora (**BIPIA**, **InjecAgent**, an
 | **Vanilla ReAct Agent** | 0.0% | 0.0% | 0.00 ms | None (Unprotected) |
 | **Regex-Only Filter** | 72.0% | 0.0% | 0.036 ms | Deterministic signatures only |
 | **LLM-as-a-Judge (Llama-Guard 3)**| 92.0% | 4.0% | 450 – 1,200 ms | Heavy secondary generative model |
-| **LightGuard-Agent (v0.5.0)** | **100.0%** | **0.0%** | **0.162 ms** | **Tier 0-3 Pipeline + RAG + Swarm + MCP Gateway** |
+| **LightGuard-Agent (v0.6.1)** | **100.0%** | **0.0%** | **0.104 ms** | **Tier 0-3 Pipeline + RAG + Swarm + MCP Gateway** |
 
-> **Key Takeaway:** LightGuard-Agent achieves **100% defense rate** against complex indirect prompt injection attacks while adding only **0.162 ms** total execution time and zero false positives on benign agent interactions.
+> **Key Takeaway:** LightGuard-Agent achieves **100% defense rate** against complex indirect prompt injection attacks while adding only **~0.10 ms** total execution time and zero false positives on benign agent interactions.
 
 ---
 

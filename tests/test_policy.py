@@ -56,3 +56,37 @@ def test_policy_from_dict_and_to_dict():
     d = cfg.to_dict()
     assert d["profile"] == "strict"
     assert d["risk_threshold"] == 0.25
+
+
+def test_policy_from_profile_and_custom_high_stakes_add():
+    policy = SecurityPolicyConfig.from_profile(PolicyProfile.STRICT)
+    assert policy.profile == PolicyProfile.STRICT
+
+    # Test .add() through proxy
+    policy.custom_high_stakes.add("execute_kubernetes_pod")
+    assert "execute_kubernetes_pod" in policy.custom_high_stakes_tools
+    assert "execute_kubernetes_pod" in policy.custom_high_stakes
+
+    # Test string profile name
+    policy2 = SecurityPolicyConfig.from_profile("permissive")
+    assert policy2.profile == PolicyProfile.PERMISSIVE
+
+
+def test_policy_explicit_tool_authorization():
+    # Test Denylist: unconditionally blocked even if context is benign
+    policy_deny = SecurityPolicyConfig(denied_tools=["transfer_funds"])
+    agent_deny = LightGuardAgent(policy=policy_deny)
+    res = agent_deny.verify_action("transfer_funds", {"amount": 100}, is_untrusted=False)
+    assert res["allowed"] is False
+    assert "explicitly denied" in res["reason"]
+
+    # Test Default-Deny Allowlist: only whitelisted tools are allowed
+    policy_allow = SecurityPolicyConfig(allowed_tools=["calculator", "web_search"])
+    agent_allow = LightGuardAgent(policy=policy_allow)
+
+    res_allowed = agent_allow.verify_action("calculator", {"expr": "1+1"}, is_untrusted=False)
+    assert res_allowed["allowed"] is True
+
+    res_blocked = agent_allow.verify_action("shell_exec", {"cmd": "whoami"}, is_untrusted=False)
+    assert res_blocked["allowed"] is False
+    assert "default-deny policy" in res_blocked["reason"]

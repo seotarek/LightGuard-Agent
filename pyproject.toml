@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lightguard-agent"
-version = "0.6.0"
+version = "0.6.1"
 description = "A Lightweight Defense Architecture Against Indirect Prompt Injection in Tool-Calling AI Agents and MCP Workflows"
 readme = "README.md"
 requires-python = ">=3.9"

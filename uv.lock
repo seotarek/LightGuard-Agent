@@ -1169,7 +1169,7 @@ wheels = [
 
 [[package]]
 name = "lightguard-agent"
-version = "0.6.0"
+version = "0.6.1"
 source = { editable = "." }
 
 [package.optional-dependencies]
