@@ -16,15 +16,31 @@ from lightguard.mcp import LightGuardMCPProxy
 class MCPSecurityGateway:
     """JSON-RPC 2.0 Security Proxy for Model Context Protocol."""
 
-    def __init__(self, guard: Optional[LightGuardAgent] = None):
+    def __init__(
+        self,
+        guard: Optional[LightGuardAgent] = None,
+        max_message_size: int = 10 * 1024 * 1024,
+    ):
         self.guard = guard if guard is not None else LightGuardAgent()
         self.proxy = LightGuardMCPProxy(guard=self.guard)
+        self.max_message_size = max_message_size
 
     def process_client_to_server(self, raw_message: str) -> Tuple[bool, str]:
         """Inspect client requests before sending to the MCP server.
 
         Returns (allowed, forwarded_or_error_message).
         """
+        if len(raw_message.encode("utf-8")) > self.max_message_size:
+            err_resp = {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {
+                    "code": -32600,
+                    "message": f"Message size ({len(raw_message.encode('utf-8'))} bytes) exceeds limit ({self.max_message_size} bytes)",
+                },
+            }
+            return False, json.dumps(err_resp)
+
         try:
             req = json.loads(raw_message)
         except Exception:
@@ -158,6 +174,25 @@ class MCPSecurityGateway:
 
         modified = False
 
+        # 0. Tool Capability Discovery: result.tools (from tools/list)
+        tools_list = result.get("tools")
+        if isinstance(tools_list, list):
+            filtered_tools = []
+            for tool_item in tools_list:
+                if isinstance(tool_item, dict):
+                    t_name = tool_item.get("name", "")
+                    if t_name in self.guard.policy.denied_tools:
+                        modified = True
+                        continue
+                    if self.guard.policy.allowed_tools and t_name not in self.guard.policy.allowed_tools:
+                        modified = True
+                        continue
+                    filtered_tools.append(tool_item)
+                else:
+                    filtered_tools.append(tool_item)
+            if modified:
+                result["tools"] = filtered_tools
+
         # 1. Standard tool execution content: result.content
         content_items = result.get("content")
         if isinstance(content_items, list):
@@ -165,11 +200,20 @@ class MCPSecurityGateway:
                 if isinstance(item, dict):
                     if item.get("type") == "text" and isinstance(item.get("text"), str):
                         raw_text = item["text"]
-                        obs = self.guard.process_observation(raw_text)
-                        if obs["is_untrusted"]:
-                            item["text"] = obs["sanitized_observation"]
-                            modified = True
-                            self.proxy.session_is_untrusted = True
+                        canary_leaked = False
+                        if self.guard.policy.enable_canary_guard:
+                            is_leaked, token = self.guard.canary.check_leakage(raw_text)
+                            if is_leaked:
+                                item["text"] = "[LightGuard Security Blocked: Secret canary leak detected in tool response]"
+                                modified = True
+                                self.proxy.session_is_untrusted = True
+                                canary_leaked = True
+                        if not canary_leaked:
+                            obs = self.guard.process_observation(raw_text)
+                            if obs["is_untrusted"]:
+                                item["text"] = obs["sanitized_observation"]
+                                modified = True
+                                self.proxy.session_is_untrusted = True
                     elif item.get("type") == "resource" and isinstance(item.get("resource"), dict):
                         res_obj = item["resource"]
                         if isinstance(res_obj.get("text"), str):
