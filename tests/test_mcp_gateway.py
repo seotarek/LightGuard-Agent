@@ -53,20 +53,22 @@ def test_mcp_gateway_server_sanitizes_injection_payload():
 def test_mcp_gateway_handles_malformed_and_list_json():
     gateway = MCPSecurityGateway()
 
-    # Empty list JSON
+    # Empty list JSON (non-object request rejected with -32600 Invalid Request)
     allowed, out = gateway.process_client_to_server("[]")
-    assert allowed is True
-    assert out == "[]"
+    assert allowed is False
+    err_obj = json.loads(out)
+    assert err_obj["error"]["code"] == -32600
 
-    # Completely malformed JSON
+    # Completely malformed JSON (rejected with -32700 Parse error)
     allowed, out = gateway.process_client_to_server("{not valid json")
-    assert allowed is True
-    assert out == "{not valid json"
+    assert allowed is False
+    err_obj = json.loads(out)
+    assert err_obj["error"]["code"] == -32700
 
     # Server to client with array
     clean, out = gateway.process_server_to_client("[]")
     assert clean is True
-    assert out == "[]"
+
 
 
 def test_mcp_gateway_handles_resource_read_and_reset_session():

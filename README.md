@@ -11,8 +11,8 @@
 [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Live%20Playground-yellow)](https://huggingface.co/spaces/seotarek/LightGuard-Agent)
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://seotarek.github.io/LightGuard-Agent/)
 [![CI](https://github.com/seotarek/LightGuard-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/seotarek/LightGuard-Agent/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-101%2F101%20passed-success.svg)](https://github.com/seotarek/LightGuard-Agent/actions)
-[![Coverage](https://img.shields.io/badge/coverage-81%25%20(core%2094%25)-brightgreen.svg)](https://github.com/seotarek/LightGuard-Agent/actions)
+[![Tests](https://img.shields.io/badge/tests-105%2F105%20passed-success.svg)](https://github.com/seotarek/LightGuard-Agent/actions)
+[![Coverage](https://img.shields.io/badge/coverage-82%25%20(core%2094%25)-brightgreen.svg)](https://github.com/seotarek/LightGuard-Agent/actions)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0%20external-purple.svg)](https://pypi.org/project/lightguard-agent/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -34,7 +34,7 @@ Autonomous AI agents executing external tools (via **ReAct loops**, **Model Cont
 
 Existing enterprise solutions either rely on brittle regex patterns or deploy heavy secondary "LLM-as-a-judge" models (such as Llama-Guard) that add **400ms – 1,200ms** of latency and multiply token costs on every single tool call.
 
-**LightGuard-Agent** solves this dilemma. It is a zero-dependency, ultra-fast Python security layer providing **sub-millisecond (< 0.2ms)** multi-tier defense with **100% attack mitigation** on standardized adversarial benchmarks.
+**LightGuard-Agent** solves this dilemma. It is a zero-dependency, ultra-fast Python security layer providing **sub-millisecond (< 0.2ms)** multi-tier defense with **100% attack mitigation** on standardized adversarial benchmark suites.
 
 ---
 
@@ -42,11 +42,11 @@ Existing enterprise solutions either rely on brittle regex patterns or deploy he
 
 * 🚀 **Sub-Millisecond Execution:** Operates at **~0.16 ms** per observation — over **4,000x faster** than LLM-as-a-judge evaluators.
 * 📦 **Zero External Dependencies:** Built with pure, hardened Python standard library primitives. No PyTorch, no Hugging Face transformers, no network bloat.
-* 🛡️ **100% Adversarial Mitigation:** Neutralizes direct injections, steganographic homoglyphs, delimiter escapes, canary exfiltrations, and multi-turn crescendo attacks.
-* 📚 **RAG Context Poisoning Shield:** Sanitizes vector database chunks, wraps retrieved knowledge in tamper-evident boundaries, and drops poisoned documents before LLM prompt assembly.
-* 🔒 **Zero-Dependency DLP & PII Redactor:** Automatically masks Visa/MasterCard (validated via **Luhn checksum algorithm**), OpenAI/Anthropic/AWS/GitHub API keys, SSNs, and emails with reversible tokens.
-* 🔌 **Universal 1-Line Drop-in:** Wrap any OpenAI, Anthropic, Groq, or Ollama client with `client = lightguard.wrap(OpenAI())` or decorate any tool with `@protect_tool`.
-* 🤖 **Native Model Context Protocol (MCP) Interceptor:** Intercepts JSON-RPC tool inputs and outputs before untrusted data reaches the host model.
+* 🛡️ **100% Adversarial Mitigation:** Neutralizes direct injections, steganographic homoglyphs, delimiter escapes, canary exfiltrations, and multi-turn crescendo attacks across tested benchmark suites.
+* 📚 **RAG Context Poisoning Shield:** Sanitizes vector database chunks, wraps retrieved knowledge in syntactic nonce isolation boundaries, and drops poisoned documents before LLM prompt assembly.
+* 🔒 **Zero-Dependency DLP & PII Redactor:** Automatically masks 13-19 digit credit cards (Visa, MasterCard, Amex, Diners Club validated via **Luhn checksum algorithm**), OpenAI/Anthropic/AWS/GitHub API keys, SSNs, and emails with reversible tokens.
+* 🔌 **Universal 1-Line Drop-in:** Wrap OpenAI (`chat.completions.create`), Anthropic (`messages.create`), Groq, or Ollama clients with full streaming tool call inspection (`client = lightguard.wrap(client)`), or decorate any tool with `@protect_tool`.
+* 🤖 **Native Model Context Protocol (MCP) Interceptor:** Fail-closed JSON-RPC 2.0 gateway intercepting tool inputs and outputs before untrusted data reaches the host model.
 * 📈 **Enterprise Prometheus Observability:** In-memory, thread-safe telemetry collector exporting native Prometheus metrics and P95 latency distributions for Grafana.
 
 ---

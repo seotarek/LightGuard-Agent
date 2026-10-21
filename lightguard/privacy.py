@@ -93,7 +93,7 @@ class PrivacyGuard:
         "EMAIL": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
         "SSN": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
         "IPV4": re.compile(r"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b"),
-        "CREDIT_CARD_CANDIDATE": re.compile(r"\b(?:\d{4}[ -]?){3}\d{4}\b"),
+        "CREDIT_CARD_CANDIDATE": re.compile(r"\b(?:\d[ -]*?){13,19}\b"),
         "PHONE_NUMBER": re.compile(r"(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"),
     }
 

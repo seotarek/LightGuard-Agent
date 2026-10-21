@@ -88,16 +88,47 @@ class ThreatIntelRegistry:
             description=description,
         )
 
-    def import_feed_json(self, feed_json: str, verify_checksum: Optional[str] = None) -> int:
-        """Import signatures from JSON payload with optional SHA-256 verification."""
-        if verify_checksum:
-            computed = hashlib.sha256(feed_json.encode("utf-8")).hexdigest()
-            if computed.lower() != verify_checksum.lower():
+    def import_feed_json(
+        self,
+        feed_json: str,
+        verify_checksum: Optional[str] = None,
+        verify_hmac_key: Optional[str] = None,
+        expected_hmac: Optional[str] = None,
+    ) -> int:
+        """Import signatures from JSON payload with SHA-256 integrity and HMAC authenticity verification."""
+        data = json.loads(feed_json)
+        if not isinstance(data, dict):
+            raise ValueError("Threat intelligence payload must be a JSON object")
+
+        # 1. SHA-256 integrity verification
+        target_checksum = verify_checksum or data.get("sha256")
+        if target_checksum:
+            verify_copy = {k: v for k, v in data.items() if k not in ("sha256", "hmac_signature")}
+            canonical_bytes = json.dumps(verify_copy, sort_keys=True).encode("utf-8")
+            computed = hashlib.sha256(canonical_bytes).hexdigest()
+            if computed.lower() != target_checksum.lower():
+                raw_hash = hashlib.sha256(feed_json.encode("utf-8")).hexdigest()
+                if raw_hash.lower() != target_checksum.lower():
+                    raise ValueError(
+                        f"Threat intelligence checksum mismatch! Expected {target_checksum}, got {computed}"
+                    )
+
+        # 2. HMAC authenticity verification (proves trusted publisher identity)
+        target_hmac = expected_hmac or data.get("hmac_signature")
+        if verify_hmac_key and target_hmac:
+            import hmac
+            verify_copy = {k: v for k, v in data.items() if k not in ("sha256", "hmac_signature")}
+            canonical_bytes = json.dumps(verify_copy, sort_keys=True).encode("utf-8")
+            computed_hmac = hmac.new(
+                verify_hmac_key.encode("utf-8"),
+                canonical_bytes,
+                hashlib.sha256,
+            ).hexdigest()
+            if not hmac.compare_digest(computed_hmac.lower(), target_hmac.lower()):
                 raise ValueError(
-                    f"Threat intelligence checksum mismatch! Expected {verify_checksum}, got {computed}"
+                    "Threat intelligence HMAC signature verification failed! Publisher authenticity unverified."
                 )
 
-        data = json.loads(feed_json)
         signatures = data.get("signatures", [])
         added_count = 0
         for s in signatures:
@@ -119,17 +150,23 @@ class ThreatIntelRegistry:
 
         return added_count
 
-    def export_feed_json(self) -> str:
-        """Export current threat intel database to verifiable JSON."""
+    def export_feed_json(self, sign_hmac_key: Optional[str] = None) -> str:
+        """Export current threat intel database to verifiable JSON with canonical hash and optional HMAC."""
         data = {
             "version": "1.0",
             "total_signatures": len(self._signatures),
             "prohibited_tools": sorted(self._custom_prohibited_tools),
             "signatures": [s.to_dict() for s in self._signatures.values()],
         }
-        raw_json = json.dumps(data, indent=2)
-        checksum = hashlib.sha256(raw_json.encode("utf-8")).hexdigest()
-        data["sha256"] = checksum
+        canonical_bytes = json.dumps(data, sort_keys=True).encode("utf-8")
+        data["sha256"] = hashlib.sha256(canonical_bytes).hexdigest()
+        if sign_hmac_key:
+            import hmac
+            data["hmac_signature"] = hmac.new(
+                sign_hmac_key.encode("utf-8"),
+                canonical_bytes,
+                hashlib.sha256,
+            ).hexdigest()
         return json.dumps(data, indent=2)
 
     def get_all_patterns(self) -> List[str]:

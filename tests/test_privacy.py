@@ -51,3 +51,29 @@ def test_scan_and_redact_pii():
 
     restored = PrivacyGuard.restore(redacted, mapping)
     assert restored == text
+
+
+def test_scan_and_redact_multilength_credit_cards():
+    # 15-digit Amex test card with valid Luhn
+    amex_card = "378282246310005"
+    assert PrivacyGuard.validate_luhn(amex_card) is True
+
+    # 16-digit Visa
+    visa_card = "4532-0151-1283-0366"
+    assert PrivacyGuard.validate_luhn(visa_card) is True
+
+    # 14-digit Diners Club test card with valid Luhn (30000000000004 -> sum is valid)
+    diners_card = "30000000000004"
+    assert PrivacyGuard.validate_luhn(diners_card) is True
+
+    text = f"Payment methods: Amex {amex_card}, Visa {visa_card}, Diners {diners_card}."
+    redacted, mapping, _ = PrivacyGuard.redact(text, reversible=True)
+
+    assert amex_card not in redacted
+    assert visa_card not in redacted
+    assert diners_card not in redacted
+    assert len(mapping) == 3
+
+    restored = PrivacyGuard.restore(redacted, mapping)
+    assert restored == text
+

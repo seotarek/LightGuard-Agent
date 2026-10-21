@@ -29,16 +29,19 @@ def test_threat_intel_register_custom():
 def test_threat_intel_export_import_verified():
     registry = ThreatIntelRegistry()
     registry.register_signature("ENTERPRISE-99", r"internal_secret_endpoint", "DATA_LEAK")
-    exported_json = registry.export_feed_json()
+    secret_key = "corp-intel-secret-key-2026"
+    exported_json = registry.export_feed_json(sign_hmac_key=secret_key)
 
-    data = json.loads(exported_json)
-    checksum = data["sha256"]
-    del data["sha256"]
-    raw_json = json.dumps(data, indent=2)
-
+    # 1. Direct import without stripping keys (canonical hash verification)
     new_registry = ThreatIntelRegistry()
-    added = new_registry.import_feed_json(raw_json, verify_checksum=checksum)
+    added = new_registry.import_feed_json(exported_json, verify_hmac_key=secret_key)
     assert added >= 1
+    assert "internal_secret_endpoint" in new_registry.get_all_patterns()
+
+    # 2. HMAC tampering detection
+    tampered_json = exported_json.replace("internal_secret_endpoint", "malicious_override")
+    with pytest.raises(ValueError, match="checksum mismatch|HMAC signature"):
+        new_registry.import_feed_json(tampered_json, verify_hmac_key=secret_key)
 
 
 def test_threat_intel_checksum_mismatch():

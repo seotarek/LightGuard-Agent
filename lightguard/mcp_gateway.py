@@ -28,11 +28,27 @@ class MCPSecurityGateway:
         try:
             req = json.loads(raw_message)
         except Exception:
-            return True, raw_message
+            err_resp = {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {
+                    "code": -32700,
+                    "message": "Parse error: Invalid JSON payload rejected by LightGuard MCP Gateway",
+                },
+            }
+            return False, json.dumps(err_resp)
 
-        # Safely handle non-dict JSON (e.g. JSON arrays or primitives)
+        # Enforce JSON-RPC 2.0 specification: top-level payload must be a JSON object
         if not isinstance(req, dict):
-            return True, raw_message
+            err_resp = {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {
+                    "code": -32600,
+                    "message": "Invalid Request: JSON-RPC payload must be a JSON object",
+                },
+            }
+            return False, json.dumps(err_resp)
 
         method = req.get("method", "")
         req_id = req.get("id")
@@ -76,10 +92,12 @@ class MCPSecurityGateway:
         try:
             resp = json.loads(raw_message)
         except Exception:
-            return True, raw_message
+            obs = self.guard.process_observation(raw_message)
+            return not obs["is_untrusted"], obs["sanitized_observation"]
 
         if not isinstance(resp, dict):
-            return True, raw_message
+            obs = self.guard.process_observation(raw_message)
+            return not obs["is_untrusted"], obs["sanitized_observation"]
 
         result = resp.get("result")
         if not isinstance(result, dict):

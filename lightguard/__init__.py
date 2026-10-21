@@ -34,7 +34,7 @@ from .telemetry import SecurityTelemetryCollector
 from .threat_intel import ThreatIntelRegistry, ThreatSignature
 from .wrapper import wrap
 
-__version__ = "0.6.1"
+__version__ = "0.6.2"
 __all__ = [
     "LightGuardAgent",
     "AsyncLightGuardAgent",

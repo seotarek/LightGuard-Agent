@@ -90,3 +90,16 @@ def test_policy_explicit_tool_authorization():
     res_blocked = agent_allow.verify_action("shell_exec", {"cmd": "whoami"}, is_untrusted=False)
     assert res_blocked["allowed"] is False
     assert "default-deny policy" in res_blocked["reason"]
+
+
+def test_policy_deny_precedence_over_whitelist():
+    # If a tool is in both whitelisted_tools and denied_tools, denied_tools must take precedence
+    policy = SecurityPolicyConfig(
+        whitelisted_tools=["dangerous_script"],
+        denied_tools=["dangerous_script"],
+    )
+    agent = LightGuardAgent(policy=policy)
+    res = agent.verify_action("dangerous_script", {}, is_untrusted=True)
+    assert res["allowed"] is False
+    assert "explicitly denied" in res["reason"]
+

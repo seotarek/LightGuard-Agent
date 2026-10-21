@@ -2,11 +2,13 @@ import re
 import time
 from typing import Any, ClassVar, Optional
 
+from lightguard.adversarial_suffix import AdversarialSuffixDetector
 from lightguard.canary import CanaryGuard
 from lightguard.obfuscation import Tier0ObfuscationShield
 from lightguard.policy import SecurityPolicyConfig
 from lightguard.privacy import PrivacyGuard
 from lightguard.telemetry import SecurityTelemetryCollector
+from lightguard.threat_intel import ThreatIntelRegistry
 
 
 class Tier1SyntacticSanitizer:
@@ -185,6 +187,16 @@ class LightGuardAgent:
         self.canary = canary_guard if canary_guard is not None else CanaryGuard()
         self.enable_telemetry = enable_telemetry
         self.telemetry = SecurityTelemetryCollector.get_instance() if enable_telemetry else None
+        self.suffix_detector = (
+            AdversarialSuffixDetector()
+            if self.policy.enable_adversarial_suffix_detector
+            else None
+        )
+        self.threat_intel = (
+            ThreatIntelRegistry.get_instance()
+            if self.policy.enable_threat_intel_matcher
+            else None
+        )
 
     def process_observation(self, raw_observation: Any) -> dict[str, Any]:
         if raw_observation is None:
@@ -227,6 +239,26 @@ class LightGuardAgent:
                 t1_flagged = True
                 risk_score = 1.0
 
+        # Check Adversarial Suffixes (GCG gradient perturbations)
+        suffix_ms = 0.0
+        if self.suffix_detector:
+            s_res = self.suffix_detector.analyze(inspection_buffer)
+            suffix_ms = s_res.get("latency_ms", 0.0)
+            if s_res.get("is_adversarial"):
+                t1_flagged = True
+                risk_score = max(risk_score, 0.85)
+
+        # Check Offline Threat Intelligence Signatures
+        intel_ms = 0.0
+        if self.threat_intel and self.threat_intel.total_signatures > 0:
+            t_intel_s = time.perf_counter()
+            for sig in self.threat_intel._signatures.values():
+                if re.search(sig.pattern, inspection_buffer, re.IGNORECASE):
+                    t1_flagged = True
+                    risk_score = max(risk_score, 0.95 if sig.severity == "CRITICAL" else 0.80)
+                    break
+            intel_ms = (time.perf_counter() - t_intel_s) * 1000.0
+
         # Recursively inspect hidden payloads decoded from steganography
         if t0_res.get("decoded_payloads"):
             for payload in t0_res["decoded_payloads"]:
@@ -247,7 +279,7 @@ class LightGuardAgent:
             or canary_leaked
         )
 
-        total_ms = t0_res["elapsed_ms"] + t1_ms + t2_ms
+        total_ms = t0_res["elapsed_ms"] + t1_ms + t2_ms + suffix_ms + intel_ms
 
         if self.enable_telemetry and self.telemetry:
             self.telemetry.record_observation(
@@ -296,11 +328,7 @@ class LightGuardAgent:
     ) -> dict[str, Any]:
         start_t = time.perf_counter()
 
-        # Whitelist override
-        if proposed_tool in self.policy.whitelisted_tools:
-            return {"allowed": True, "reason": "Whitelisted tool", "t3_latency_ms": 0.001}
-
-        # Authorization Rule 1: Explicit Denylist (Unconditional block)
+        # Authorization Rule 1: Explicit Denylist (Highest Precedence - Unconditional Block)
         if proposed_tool in self.policy.denied_tools:
             elapsed_ms = (time.perf_counter() - start_t) * 1000.0
             if self.enable_telemetry and self.telemetry:
@@ -321,6 +349,10 @@ class LightGuardAgent:
                 "reason": f"Authorization Policy Blocked: Tool '{proposed_tool}' is not in allowed_tools (default-deny policy).",
                 "t3_latency_ms": elapsed_ms,
             }
+
+        # Whitelist override (Bypasses untrusted observation restriction for permitted tools)
+        if proposed_tool in self.policy.whitelisted_tools:
+            return {"allowed": True, "reason": "Whitelisted tool", "t3_latency_ms": 0.001}
 
         # Step 1: Verify tool arguments against active Canary tokens
         if self.policy.enable_canary_guard:

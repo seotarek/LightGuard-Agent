@@ -22,6 +22,8 @@ class SecurityPolicyConfig:
     whitelisted_tools: list[str] = dataclasses.field(default_factory=list)
     allowed_tools: list[str] = dataclasses.field(default_factory=list)
     denied_tools: list[str] = dataclasses.field(default_factory=list)
+    enable_adversarial_suffix_detector: bool = True
+    enable_threat_intel_matcher: bool = True
 
     @classmethod
     def strict(cls) -> "SecurityPolicyConfig":
@@ -130,6 +132,8 @@ class SecurityPolicyConfig:
             whitelisted_tools=list(data.get("whitelisted_tools", [])),
             allowed_tools=list(data.get("allowed_tools", [])),
             denied_tools=list(data.get("denied_tools", [])),
+            enable_adversarial_suffix_detector=bool(data.get("enable_adversarial_suffix_detector", True)),
+            enable_threat_intel_matcher=bool(data.get("enable_threat_intel_matcher", True)),
         )
 
     @classmethod
@@ -154,4 +158,6 @@ class SecurityPolicyConfig:
             "whitelisted_tools": self.whitelisted_tools,
             "allowed_tools": self.allowed_tools,
             "denied_tools": self.denied_tools,
+            "enable_adversarial_suffix_detector": self.enable_adversarial_suffix_detector,
+            "enable_threat_intel_matcher": self.enable_threat_intel_matcher,
         }
