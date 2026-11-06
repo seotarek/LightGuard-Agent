@@ -13,6 +13,7 @@ from typing import Any, Optional, Tuple, Union
 from lightguard.audit import AuditEvent, SecurityReasonCode
 from lightguard.core import LightGuardAgent
 from lightguard.mcp import LightGuardMCPProxy
+from lightguard.policy import AuthorizationContext
 
 
 class MCPSecurityGateway:
@@ -32,7 +33,7 @@ class MCPSecurityGateway:
     def handle_message(
         self,
         message: Union[str, dict[str, Any]],
-        context: Optional[Any] = None,
+        context: Optional[Union[AuthorizationContext, Any]] = None,
     ) -> dict[str, Any]:
         """Convenience method for directly processing in-memory JSON-RPC messages."""
         raw_str = json.dumps(message) if isinstance(message, dict) else str(message)
@@ -45,7 +46,7 @@ class MCPSecurityGateway:
     def process_client_to_server(
         self,
         raw_message: str,
-        context: Optional[Any] = None,
+        context: Optional[Union[AuthorizationContext, Any]] = None,
     ) -> Tuple[bool, str]:
         """Inspect client requests before sending to the MCP server.
 
@@ -164,19 +165,57 @@ class MCPSecurityGateway:
                 }
                 return False, json.dumps(err_resp)
 
-            validation = self.proxy.intercept_request(
-                tool_name=tool_name,
-                arguments=tool_args,
-                context=context,
-            )
+            try:
+                try:
+                    validation = self.proxy.intercept_request(
+                        tool_name=tool_name,
+                        arguments=tool_args,
+                        context=context,
+                    )
+                except TypeError:
+                    # Backward compatibility for proxies not accepting context keyword argument
+                    validation = self.proxy.intercept_request(
+                        tool_name=tool_name,
+                        arguments=tool_args,
+                    )
+            except Exception as e:
+                if self.audit_logger:
+                    self.audit_logger.log(
+                        AuditEvent(
+                            event_id=f"mcp-{time.time_ns()}",
+                            timestamp=time.time(),
+                            event_type="mcp_request",
+                            decision="BLOCK",
+                            reason_code=SecurityReasonCode.LG_TOOL_ROLE_UNAUTHORIZED,
+                            reason=f"MCP Gateway Internal Exception during validation: {e}",
+                        )
+                    )
+                err_resp = {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {
+                        "code": -32603,
+                        "message": f"Internal error during LightGuard security validation: {str(e)}",
+                        "data": {
+                            "tool_name": tool_name,
+                            "blocked_by": "LightGuard MCP Gateway",
+                        },
+                    },
+                }
+                return False, json.dumps(err_resp)
 
-            if not validation["allowed"]:
+            if not isinstance(validation, dict) or not validation.get("allowed"):
+                reason = (
+                    validation.get("reason", "Action blocked by security policy")
+                    if isinstance(validation, dict)
+                    else "Invalid validation response"
+                )
                 err_resp = {
                     "jsonrpc": "2.0",
                     "id": req_id,
                     "error": {
                         "code": -32001,
-                        "message": f"LightGuard Security Violation: {validation['reason']}",
+                        "message": f"LightGuard Security Violation: {reason}",
                         "data": {
                             "tool_name": tool_name,
                             "blocked_by": "LightGuard MCP Gateway",
@@ -187,7 +226,11 @@ class MCPSecurityGateway:
 
         return True, raw_message
 
-    def process_server_to_client(self, raw_message: str) -> Tuple[bool, str]:
+    def process_server_to_client(
+        self,
+        raw_message: str,
+        context: Optional[Union[AuthorizationContext, Any]] = None,
+    ) -> Tuple[bool, str]:
         """Inspect and sanitize server responses before returning to the LLM.
 
         Returns (is_clean, sanitized_message).
@@ -211,6 +254,12 @@ class MCPSecurityGateway:
         # 0. Tool Capability Discovery: result.tools (from tools/list)
         tools_list = result.get("tools")
         if isinstance(tools_list, list):
+            effective_context = context
+            if effective_context is None:
+                from lightguard.policy import current_authorization_context
+
+                effective_context = current_authorization_context.get()
+
             filtered_tools = []
             for tool_item in tools_list:
                 if isinstance(tool_item, dict):
@@ -221,6 +270,51 @@ class MCPSecurityGateway:
                     if self.guard.policy.allowed_tools and t_name not in self.guard.policy.allowed_tools:
                         modified = True
                         continue
+
+                    # Role-based and capability-based discovery filtering
+                    if self.guard.policy.tool_registry:
+                        tool_meta = self.guard.policy.tool_registry.get_tool(t_name)
+                        if tool_meta:
+                            # Required role enforcement
+                            if tool_meta.required_role:
+                                caller_role = getattr(effective_context, "caller_role", "user") if effective_context else "user"
+                                if caller_role.lower() != "admin" and caller_role.lower() != tool_meta.required_role.lower():
+                                    modified = True
+                                    continue
+
+                            # Capabilities enforcement
+                            if tool_meta.capabilities and effective_context:
+                                caller_caps = getattr(effective_context, "capabilities", None)
+                                if caller_caps is None and hasattr(effective_context, "metadata"):
+                                    caller_caps = effective_context.metadata.get("capabilities")
+                                if caller_caps is not None:
+                                    if not set(tool_meta.capabilities).issubset(set(caller_caps)):
+                                        modified = True
+                                        continue
+
+                    # Context explicit allowed_tools
+                    if effective_context:
+                        ctx_allowed = getattr(effective_context, "allowed_tools", None)
+                        if ctx_allowed is None and hasattr(effective_context, "metadata"):
+                            ctx_allowed = effective_context.metadata.get("allowed_tools")
+                        if ctx_allowed is not None and t_name not in ctx_allowed:
+                            modified = True
+                            continue
+
+                    # Untrusted caller hiding high-stakes/critical tools
+                    caller_untrusted = getattr(effective_context, "is_untrusted", False) if effective_context else False
+                    if caller_untrusted:
+                        is_high_risk = False
+                        if t_name in self.guard.policy.custom_high_stakes_tools:
+                            is_high_risk = True
+                        elif self.guard.policy.tool_registry:
+                            tm = self.guard.policy.tool_registry.get_tool(t_name)
+                            if tm and tm.risk_level in ("high", "critical"):
+                                is_high_risk = True
+                        if is_high_risk:
+                            modified = True
+                            continue
+
                     filtered_tools.append(tool_item)
                 else:
                     filtered_tools.append(tool_item)

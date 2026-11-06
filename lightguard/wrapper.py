@@ -5,6 +5,7 @@ from typing import Any, Callable, Iterator, Optional, Union
 
 from lightguard.core import LightGuardAgent
 from lightguard.decorators import SecurityViolationError
+from lightguard.policy import AuthorizationContext, get_current_authorization_context
 
 
 def _unmarshal_tool_args(raw_args: Any) -> dict[str, Any]:
@@ -34,13 +35,40 @@ class LightGuardStreamWrapper:
         guard: LightGuardAgent,
         block_on_violation: bool = True,
         is_untrusted: bool = False,
+        context: Optional[AuthorizationContext] = None,
+        max_stream_bytes: int = 10 * 1024 * 1024,
     ):
         self._stream = stream
         self._guard = guard
         self._block = block_on_violation
         self._is_untrusted = is_untrusted
-        self._accumulated_content: list[str] = []
+        self._context = context if context is not None else get_current_authorization_context()
+        self._max_stream_bytes = max_stream_bytes
+        self._total_bytes = 0
+        self._tail_window = ""
         self._tool_calls_accumulator: dict[int, dict[str, str]] = {}
+
+    def _inspect_stream_text(self, text_piece: str) -> None:
+        if not text_piece:
+            return
+        piece_bytes = len(text_piece.encode("utf-8", errors="replace"))
+        self._total_bytes += piece_bytes
+        if self._total_bytes > self._max_stream_bytes:
+            if self._block:
+                raise SecurityViolationError(
+                    f"LightGuard Security Block: Stream exceeded maximum allowed byte limit ({self._max_stream_bytes} bytes)."
+                )
+        if self._guard.policy.enable_canary_guard:
+            window = self._tail_window + text_piece
+            is_leaked, _ = self._guard.canary.check_leakage(window)
+            if is_leaked and self._block:
+                raise SecurityViolationError(
+                    "LightGuard Security Block: Stream intercepted due to confidential canary token leakage."
+                )
+            if len(window) > 256:
+                self._tail_window = window[-256:]
+            else:
+                self._tail_window = window
 
     def __iter__(self) -> Iterator[Any]:
         return self
@@ -87,13 +115,7 @@ class LightGuardStreamWrapper:
                 )
 
         if text_piece:
-            self._accumulated_content.append(text_piece)
-            full_text = "".join(self._accumulated_content)
-            is_leaked, _ = self._guard.canary.check_leakage(full_text)
-            if is_leaked and self._block:
-                raise SecurityViolationError(
-                    "LightGuard Security Block: Stream intercepted due to confidential canary token leakage."
-                )
+            self._inspect_stream_text(text_piece)
 
         return chunk
 
@@ -119,6 +141,7 @@ class LightGuardStreamWrapper:
                     fn_name,
                     parsed_args,
                     is_untrusted=self._is_untrusted,
+                    context=self._context,
                 )
                 if not act_res["allowed"] and self._block:
                     raise SecurityViolationError(
@@ -179,6 +202,7 @@ class LightGuardStreamWrapper:
                     fn_name,
                     parsed_args,
                     is_untrusted=self._is_untrusted,
+                    context=self._context,
                 )
                 if not act_res["allowed"] and self._block:
                     raise SecurityViolationError(
@@ -195,13 +219,40 @@ class LightGuardAsyncStreamWrapper:
         guard: LightGuardAgent,
         block_on_violation: bool = True,
         is_untrusted: bool = False,
+        context: Optional[AuthorizationContext] = None,
+        max_stream_bytes: int = 10 * 1024 * 1024,
     ):
         self._stream = async_stream
         self._guard = guard
         self._block = block_on_violation
         self._is_untrusted = is_untrusted
-        self._accumulated_content: list[str] = []
+        self._context = context if context is not None else get_current_authorization_context()
+        self._max_stream_bytes = max_stream_bytes
+        self._total_bytes = 0
+        self._tail_window = ""
         self._tool_calls_accumulator: dict[int, dict[str, str]] = {}
+
+    def _inspect_stream_text(self, text_piece: str) -> None:
+        if not text_piece:
+            return
+        piece_bytes = len(text_piece.encode("utf-8", errors="replace"))
+        self._total_bytes += piece_bytes
+        if self._total_bytes > self._max_stream_bytes:
+            if self._block:
+                raise SecurityViolationError(
+                    f"LightGuard Security Block: Stream exceeded maximum allowed byte limit ({self._max_stream_bytes} bytes)."
+                )
+        if self._guard.policy.enable_canary_guard:
+            window = self._tail_window + text_piece
+            is_leaked, _ = self._guard.canary.check_leakage(window)
+            if is_leaked and self._block:
+                raise SecurityViolationError(
+                    "LightGuard Security Block in async stream: Output leaked confidential canary token."
+                )
+            if len(window) > 256:
+                self._tail_window = window[-256:]
+            else:
+                self._tail_window = window
 
     def __aiter__(self) -> Any:
         self._async_iter = self._stream.__aiter__()
@@ -218,13 +269,7 @@ class LightGuardAsyncStreamWrapper:
                 if delta:
                     content = getattr(delta, "content", None)
                     if content:
-                        self._accumulated_content.append(content)
-                        full_text = "".join(self._accumulated_content)
-                        is_leaked, _ = self._guard.canary.check_leakage(full_text)
-                        if is_leaked and self._block:
-                            raise SecurityViolationError(
-                                "LightGuard Security Block in async stream: Output leaked confidential canary token."
-                            )
+                        self._inspect_stream_text(content)
                     tool_calls = getattr(delta, "tool_calls", None)
                     if tool_calls:
                         for tc in tool_calls:
@@ -248,6 +293,7 @@ class LightGuardAsyncStreamWrapper:
                                 fn_name,
                                 parsed_args,
                                 is_untrusted=self._is_untrusted,
+                                context=self._context,
                             )
                             if not act_res["allowed"] and self._block:
                                 raise SecurityViolationError(
@@ -264,13 +310,7 @@ class LightGuardAsyncStreamWrapper:
                 if d_type == "text_delta":
                     text_val = getattr(c_delta, "text", "")
                     if text_val:
-                        self._accumulated_content.append(text_val)
-                        full_text = "".join(self._accumulated_content)
-                        is_leaked, _ = self._guard.canary.check_leakage(full_text)
-                        if is_leaked and self._block:
-                            raise SecurityViolationError(
-                                "LightGuard Security Block in async Anthropic stream: Output leaked confidential canary token."
-                            )
+                        self._inspect_stream_text(text_val)
                 elif d_type == "input_json_delta":
                     idx = getattr(chunk, "index", 0)
                     if idx not in self._tool_calls_accumulator:
@@ -288,6 +328,7 @@ class LightGuardAsyncStreamWrapper:
                         fn_name,
                         parsed_args,
                         is_untrusted=self._is_untrusted,
+                        context=self._context,
                     )
                     if not act_res["allowed"] and self._block:
                         raise SecurityViolationError(
@@ -311,29 +352,57 @@ class LightGuardChatCompletionsProxy:
     def _inspect_result(self, result: Any, session_untrusted: bool) -> None:
         try:
             if hasattr(result, "choices") and result.choices:
-                msg = result.choices[0].message
-                content = getattr(msg, "content", "") or ""
-                if content:
-                    is_leaked, _ = self._guard.canary.check_leakage(content)
-                    if is_leaked and self._block:
-                        raise SecurityViolationError(
-                            "LightGuard Security Block: Output leaked confidential canary token."
-                        )
-                tool_calls = getattr(msg, "tool_calls", None)
-                if tool_calls:
-                    for tc in tool_calls:
-                        func = getattr(tc, "function", None)
-                        if func:
-                            fn_name = getattr(func, "name", "")
-                            raw_args = getattr(func, "arguments", "{}")
-                            fn_args = _unmarshal_tool_args(raw_args)
-                            act_res = self._guard.verify_action(
-                                fn_name, fn_args, is_untrusted=session_untrusted
+                for choice in result.choices:
+                    msg = (
+                        getattr(choice, "message", None)
+                        if hasattr(choice, "message")
+                        else (choice.get("message") if isinstance(choice, dict) else None)
+                    )
+                    if not msg:
+                        continue
+                    content = (
+                        getattr(msg, "content", "")
+                        if hasattr(msg, "content")
+                        else (msg.get("content", "") if isinstance(msg, dict) else "")
+                    )
+                    content = content or ""
+                    if content:
+                        is_leaked, _ = self._guard.canary.check_leakage(content)
+                        if is_leaked and self._block:
+                            raise SecurityViolationError(
+                                "LightGuard Security Block: Output leaked confidential canary token."
                             )
-                            if not act_res["allowed"] and self._block:
-                                raise SecurityViolationError(
-                                    f"LightGuard Action Firewall Block: {act_res['reason']}"
+                    tool_calls = (
+                        getattr(msg, "tool_calls", None)
+                        if hasattr(msg, "tool_calls")
+                        else (msg.get("tool_calls") if isinstance(msg, dict) else None)
+                    )
+                    if tool_calls:
+                        for tc in tool_calls:
+                            func = (
+                                getattr(tc, "function", None)
+                                if hasattr(tc, "function")
+                                else (tc.get("function") if isinstance(tc, dict) else None)
+                            )
+                            if func:
+                                fn_name = (
+                                    getattr(func, "name", "")
+                                    if hasattr(func, "name")
+                                    else func.get("name", "")
                                 )
+                                raw_args = (
+                                    getattr(func, "arguments", "{}")
+                                    if hasattr(func, "arguments")
+                                    else func.get("arguments", "{}")
+                                )
+                                fn_args = _unmarshal_tool_args(raw_args)
+                                act_res = self._guard.verify_action(
+                                    fn_name, fn_args, is_untrusted=session_untrusted
+                                )
+                                if not act_res["allowed"] and self._block:
+                                    raise SecurityViolationError(
+                                        f"LightGuard Action Firewall Block: {act_res['reason']}"
+                                    )
         except SecurityViolationError:
             raise
         except Exception as e:
@@ -343,6 +412,7 @@ class LightGuardChatCompletionsProxy:
                 )
 
     def create(self, *args: Any, **kwargs: Any) -> Any:
+        captured_ctx = get_current_authorization_context()
         session_untrusted = False
         messages = kwargs.get("messages", [])
         if messages and isinstance(messages, list):
@@ -380,7 +450,11 @@ class LightGuardChatCompletionsProxy:
                 resolved = await result
                 if kwargs.get("stream", False):
                     return LightGuardAsyncStreamWrapper(
-                        resolved, self._guard, self._block, is_untrusted=session_untrusted
+                        resolved,
+                        self._guard,
+                        self._block,
+                        is_untrusted=session_untrusted,
+                        context=captured_ctx,
                     )
                 self._inspect_result(resolved, session_untrusted)
                 return resolved
@@ -388,7 +462,13 @@ class LightGuardChatCompletionsProxy:
             return _async_create()
 
         if kwargs.get("stream", False):
-            return LightGuardStreamWrapper(result, self._guard, self._block, is_untrusted=session_untrusted)
+            return LightGuardStreamWrapper(
+                result,
+                self._guard,
+                self._block,
+                is_untrusted=session_untrusted,
+                context=captured_ctx,
+            )
 
         self._inspect_result(result, session_untrusted)
         return result
@@ -440,6 +520,7 @@ class LightGuardMessagesProxy:
                 )
 
     def create(self, *args: Any, **kwargs: Any) -> Any:
+        captured_ctx = get_current_authorization_context()
         session_untrusted = False
         system_prompt = kwargs.get("system")
         if isinstance(system_prompt, str):
@@ -488,7 +569,11 @@ class LightGuardMessagesProxy:
                 resolved = await result
                 if kwargs.get("stream", False):
                     return LightGuardAsyncStreamWrapper(
-                        resolved, self._guard, self._block, is_untrusted=session_untrusted
+                        resolved,
+                        self._guard,
+                        self._block,
+                        is_untrusted=session_untrusted,
+                        context=captured_ctx,
                     )
                 self._inspect_result(resolved, session_untrusted)
                 return resolved
@@ -496,7 +581,13 @@ class LightGuardMessagesProxy:
             return _async_create()
 
         if kwargs.get("stream", False):
-            return LightGuardStreamWrapper(result, self._guard, self._block, is_untrusted=session_untrusted)
+            return LightGuardStreamWrapper(
+                result,
+                self._guard,
+                self._block,
+                is_untrusted=session_untrusted,
+                context=captured_ctx,
+            )
 
         self._inspect_result(result, session_untrusted)
         return result

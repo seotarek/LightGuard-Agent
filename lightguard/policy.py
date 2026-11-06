@@ -3,6 +3,7 @@ import contextvars
 import dataclasses
 import enum
 import json
+import re
 from typing import Any, Optional
 
 
@@ -19,13 +20,16 @@ class AuthorizationMode(str, enum.Enum):
     PERMISSIVE = "permissive"
 
 
-def validate_json_schema(schema: dict[str, Any], data: Any) -> tuple[bool, Optional[str]]:
+def validate_json_schema(schema: Any, data: Any) -> tuple[bool, Optional[str]]:
     """Pure-Python standard-library JSON schema validator.
 
-    Validates types, required fields, properties, additionalProperties, and array items.
+    Validates types, required fields, properties, additionalProperties, array items,
+    enum, numeric bounds (minimum, maximum), string constraints (minLength, maxLength, pattern),
+    and array bounds (minItems, maxItems).
+    Rejects malformed or non-dictionary schema specifications.
     """
     if not isinstance(schema, dict):
-        return True, None
+        return False, "Invalid schema: schema must be a dictionary"
 
     expected_type = schema.get("type")
     if expected_type:
@@ -43,25 +47,60 @@ def validate_json_schema(schema: dict[str, Any], data: Any) -> tuple[bool, Optio
             actual_type = type(data).__name__
             return False, f"Type mismatch: expected '{expected_type}', got '{actual_type}'"
 
+    # Enum constraint
+    if "enum" in schema:
+        allowed_enum = schema["enum"]
+        if isinstance(allowed_enum, (list, tuple, set)) and data not in allowed_enum:
+            return False, f"Value '{data}' is not in allowed enum values: {list(allowed_enum)}"
+
+    # Numeric bounds
+    if isinstance(data, (int, float)) and not isinstance(data, bool):
+        if "minimum" in schema and data < schema["minimum"]:
+            return False, f"Value {data} is less than minimum {schema['minimum']}"
+        if "maximum" in schema and data > schema["maximum"]:
+            return False, f"Value {data} is greater than maximum {schema['maximum']}"
+
+    # String constraints
+    if isinstance(data, str):
+        if "minLength" in schema and len(data) < schema["minLength"]:
+            return False, f"String length {len(data)} is less than minLength {schema['minLength']}"
+        if "maxLength" in schema and len(data) > schema["maxLength"]:
+            return False, f"String length {len(data)} is greater than maxLength {schema['maxLength']}"
+        if "pattern" in schema:
+            try:
+                if not re.search(schema["pattern"], data):
+                    return False, f"String '{data}' does not match pattern: {schema['pattern']}"
+            except re.error as e:
+                return False, f"Invalid regex pattern in schema: {e}"
+
+    # Object properties & required fields
     if isinstance(data, dict):
         required_fields = schema.get("required", [])
-        for req in required_fields:
-            if req not in data:
-                return False, f"Missing required property: '{req}'"
+        if isinstance(required_fields, (list, tuple, set)):
+            for req in required_fields:
+                if req not in data:
+                    return False, f"Missing required property: '{req}'"
 
         properties = schema.get("properties", {})
-        if schema.get("additionalProperties") is False:
+        if schema.get("additionalProperties") is False and isinstance(properties, dict):
             for key in data:
                 if key not in properties:
                     return False, f"Additional property '{key}' not allowed by schema"
 
-        for key, prop_schema in properties.items():
-            if key in data and isinstance(prop_schema, dict):
-                ok, err = validate_json_schema(prop_schema, data[key])
-                if not ok:
-                    return False, f"Property '{key}': {err}"
+        if isinstance(properties, dict):
+            for key, prop_schema in properties.items():
+                if key in data and isinstance(prop_schema, dict):
+                    ok, err = validate_json_schema(prop_schema, data[key])
+                    if not ok:
+                        return False, f"Property '{key}': {err}"
 
+    # Array items & bounds
     elif isinstance(data, list):
+        if "minItems" in schema and len(data) < schema["minItems"]:
+            return False, f"Array length {len(data)} is less than minItems {schema['minItems']}"
+        if "maxItems" in schema and len(data) > schema["maxItems"]:
+            return False, f"Array length {len(data)} is greater than maxItems {schema['maxItems']}"
+
         items_schema = schema.get("items")
         if isinstance(items_schema, dict):
             for i, item in enumerate(data):
@@ -186,8 +225,9 @@ class SecurityPolicyConfig:
     enable_dlp_redaction: bool = False
     custom_high_stakes_tools: list[str] = dataclasses.field(default_factory=list)
     whitelisted_tools: list[str] = dataclasses.field(default_factory=list)
-    allowed_tools: list[str] = dataclasses.field(default_factory=list)
+    allowed_tools: Optional[list[str]] = None
     denied_tools: list[str] = dataclasses.field(default_factory=list)
+    require_tool_registration: bool = False
     enable_adversarial_suffix_detector: bool = True
     enable_threat_intel_matcher: bool = True
     tool_registry: Optional[ToolPolicyRegistry] = None
@@ -203,6 +243,7 @@ class SecurityPolicyConfig:
         return cls(
             profile=PolicyProfile.STRICT,
             authorization_mode=AuthorizationMode.STRICT,
+            require_tool_registration=True,
             risk_threshold=0.35,
             block_on_untrusted=True,
             enable_obfuscation_shield=True,
@@ -231,6 +272,19 @@ class SecurityPolicyConfig:
             authorization_mode=AuthorizationMode.PERMISSIVE,
             risk_threshold=0.70,
             block_on_untrusted=False,
+            enable_obfuscation_shield=True,
+            enable_canary_guard=True,
+            enable_dlp_redaction=False,
+        )
+
+    @classmethod
+    def compatibility(cls) -> "SecurityPolicyConfig":
+        """Permissive execution compatibility profile for legacy workloads allowing unconstrained tools."""
+        return cls(
+            profile=PolicyProfile.BALANCED,
+            authorization_mode=AuthorizationMode.COMPATIBILITY,
+            risk_threshold=0.50,
+            block_on_untrusted=True,
             enable_obfuscation_shield=True,
             enable_canary_guard=True,
             enable_dlp_redaction=False,
@@ -312,8 +366,9 @@ class SecurityPolicyConfig:
             enable_dlp_redaction=bool(data.get("enable_dlp_redaction", False)),
             custom_high_stakes_tools=list(data.get("custom_high_stakes_tools", [])),
             whitelisted_tools=list(data.get("whitelisted_tools", [])),
-            allowed_tools=list(data.get("allowed_tools", [])),
+            allowed_tools=list(data["allowed_tools"]) if data.get("allowed_tools") is not None else None,
             denied_tools=list(data.get("denied_tools", [])),
+            require_tool_registration=bool(data.get("require_tool_registration", False)),
             enable_adversarial_suffix_detector=bool(data.get("enable_adversarial_suffix_detector", True)),
             enable_threat_intel_matcher=bool(data.get("enable_threat_intel_matcher", True)),
         )
@@ -341,6 +396,7 @@ class SecurityPolicyConfig:
             "whitelisted_tools": self.whitelisted_tools,
             "allowed_tools": self.allowed_tools,
             "denied_tools": self.denied_tools,
+            "require_tool_registration": self.require_tool_registration,
             "enable_adversarial_suffix_detector": self.enable_adversarial_suffix_detector,
             "enable_threat_intel_matcher": self.enable_threat_intel_matcher,
         }

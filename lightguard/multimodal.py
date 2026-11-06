@@ -121,13 +121,30 @@ class MultimodalShield:
                     is_sanitized = True
                     attrs_to_remove.append(attr_name)
 
-                # Dangerous URI protocols
+                # Dangerous URI protocols or external resources
                 elif "href" in local_attr or "src" in local_attr:
                     if val_lower.startswith(("javascript:", "vbscript:", "data:text/html")):
                         threats.append(f"Executable script URI stripped from '{attr_name}'")
                         is_compromised = True
                         is_sanitized = True
                         attrs_to_remove.append(attr_name)
+                    elif re.match(r"^\s*(https?:|ftp:|file:|\/\/)", val_lower):
+                        threats.append(f"External resource reference stripped from '{attr_name}'")
+                        is_suspicious = True
+                        is_sanitized = True
+                        attrs_to_remove.append(attr_name)
+
+                elif local_attr == "style":
+                    if re.search(r"url\s*\(\s*['\"]?\s*(?:https?:|ftp:|file:|\/\/)", val_str, re.IGNORECASE):
+                        threats.append("External resource URL stripped from style attribute")
+                        is_suspicious = True
+                        is_sanitized = True
+                        elem.attrib[attr_name] = re.sub(
+                            r"url\s*\(\s*['\"]?\s*(?:https?:|ftp:|file:|\/\/)[^)'\"]*['\"]?\s*\)",
+                            "none",
+                            val_str,
+                            flags=re.IGNORECASE,
+                        )
 
             for a in attrs_to_remove:
                 del elem.attrib[a]
@@ -145,8 +162,22 @@ class MultimodalShield:
             if any(h in style_val for h in ("display:none", "display: none", "opacity:0", "opacity: 0", "visibility:hidden")):
                 is_hidden = True
 
+            local_tag = elem.tag.split("}")[-1].lower()
+            if local_tag == "style" and elem.text:
+                if re.search(r"url\s*\(\s*['\"]?\s*(?:https?:|ftp:|file:|\/\/)|@import", elem.text, re.IGNORECASE):
+                    threats.append("External resource URL stripped from <style> element")
+                    is_suspicious = True
+                    is_sanitized = True
+                    elem.text = re.sub(r"@import\s+[^;]+;", "", elem.text, flags=re.IGNORECASE)
+                    elem.text = re.sub(
+                        r"url\s*\(\s*['\"]?\s*(?:https?:|ftp:|file:|\/\/)[^)'\"]*['\"]?\s*\)",
+                        "none",
+                        elem.text,
+                        flags=re.IGNORECASE,
+                    )
+
             # Inspect and sanitize text content
-            if elem.text and elem.text.strip():
+            if local_tag != "style" and elem.text and elem.text.strip():
                 obs = self.guard.process_observation(elem.text)
                 if obs["is_untrusted"]:
                     threat_desc = f"Prompt injection in SVG text: {obs['threat_categories']}"

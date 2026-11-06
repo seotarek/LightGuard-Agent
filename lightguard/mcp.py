@@ -37,12 +37,27 @@ class LightGuardMCPProxy:
         Returns a dictionary with 'allowed' (bool), and if blocked,
         an MCP-compatible error payload.
         """
-        verif = self.guard.verify_action(
-            proposed_tool=tool_name,
-            tool_args=arguments,
-            is_untrusted=self.has_untrusted_observation,
-            context=context,
-        )
+        try:
+            verif = self.guard.verify_action(
+                proposed_tool=tool_name,
+                tool_args=arguments,
+                is_untrusted=self.has_untrusted_observation,
+                context=context,
+            )
+        except Exception as exc:
+            return {
+                "allowed": False,
+                "reason": f"Internal Security Error during validation: {str(exc)}",
+                "mcp_error_response": {
+                    "isError": True,
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"[LightGuard Security Firewall Error] Internal validation failure: {str(exc)}",
+                        }
+                    ],
+                },
+            }
 
         if not verif["allowed"]:
             return {

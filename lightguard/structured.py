@@ -5,7 +5,7 @@ import re
 import socket
 import time
 import urllib.parse
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from lightguard.core import LightGuardAgent
 
@@ -206,11 +206,18 @@ class StructuredOutputGuard:
                     resolved_disallowed, res_reason = self._is_disallowed_ip(resolved_ip)
                     if resolved_disallowed:
                         return f"SSRF protection blocked URL host '{hostname}' resolving to internal IP '{resolved_ip}': {res_reason}"
-            except socket.gaierror:
-                if hostname_lower.endswith((".internal", ".local", ".corp", ".lan", ".home")):
+            except (socket.gaierror, socket.herror, OSError) as e:
+                is_compat = False
+                if effective_guard and hasattr(effective_guard, "policy"):
+                    p_mode = getattr(effective_guard.policy, "mode", None)
+                    if p_mode in ("COMPATIBILITY", "compatibility") or getattr(p_mode, "value", None) == "compatibility":
+                        is_compat = True
+                if not is_compat:
+                    return f"SSRF protection blocked unresolvable host '{hostname}': DNS resolution failed ({e})."
+                elif hostname_lower.endswith((".internal", ".local", ".corp", ".lan", ".home")):
                     return f"SSRF protection blocked unresolvable internal TLD host: '{hostname}'."
-            except Exception:
-                pass
+            except Exception as e:
+                return f"SSRF protection blocked host '{hostname}': DNS resolution error ({e})."
         except Exception as e:
             return f"Malformed URL rejected: {e}"
         return None
@@ -383,3 +390,50 @@ class StructuredOutputGuard:
             "sanitized_arguments": sanitized_args,
             "latency_ms": latency_ms,
         }
+
+
+def pin_url_connection(
+    url: str,
+    timeout: float = 5.0,
+    guard: Optional[Any] = None,
+) -> Tuple[str, int, str]:
+    """Validates a URL against SSRF and resolves/pins its connection target to prevent TOCTOU and DNS rebinding.
+
+    Returns:
+        Tuple of (hostname, port, resolved_ip)
+
+    Raises:
+        SecurityViolationError: If URL is disallowed, unresolvable, or resolves to private/internal IP.
+    """
+    struct_guard = StructuredOutputGuard(guard=guard)
+    err = struct_guard.validate_url_ssrf(url, guard=guard)
+    if err:
+        from lightguard.decorators import SecurityViolationError
+
+        raise SecurityViolationError(f"SSRF violation: {err}")
+
+    parsed = urllib.parse.urlparse(url)
+    hostname = parsed.hostname or ""
+    port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, port, proto=socket.IPPROTO_TCP)
+        if not addr_info:
+            from lightguard.decorators import SecurityViolationError
+
+            raise SecurityViolationError(f"DNS resolution failed for host '{hostname}'.")
+        resolved_ip = addr_info[0][4][0]
+    except Exception as e:
+        from lightguard.decorators import SecurityViolationError
+
+        raise SecurityViolationError(f"DNS resolution failed for host '{hostname}': {e}")
+
+    disallowed, reason = struct_guard._is_disallowed_ip(resolved_ip)
+    if disallowed:
+        from lightguard.decorators import SecurityViolationError
+
+        raise SecurityViolationError(
+            f"SSRF violation: Resolved IP '{resolved_ip}' is disallowed: {reason}"
+        )
+
+    return hostname, port, resolved_ip

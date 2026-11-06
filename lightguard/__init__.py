@@ -38,12 +38,12 @@ from .rag import RAGContextShield, SourceTrustLevel
 from .redteam import run_redteam_audit
 from .reporting import ComplianceReportGenerator
 from .session import StatefulSessionGuard
-from .structured import StructuredOutputGuard
+from .structured import StructuredOutputGuard, pin_url_connection
 from .telemetry import SecurityTelemetryCollector
 from .threat_intel import ThreatIntelRegistry, ThreatSignature
 from .wrapper import wrap, wrap_client
 
-__version__ = "0.7.1"
+__version__ = "0.7.2"
 __all__ = [
     "LightGuardAgent",
     "run_bipia_benchmark",
@@ -80,6 +80,7 @@ __all__ = [
     "MCPGateway",
     "MultimodalShield",
     "StructuredOutputGuard",
+    "pin_url_connection",
     "ComplianceReportGenerator",
     "LightGuardCallbackHandler",
     "create_langgraph_guard",

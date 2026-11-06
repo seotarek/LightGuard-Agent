@@ -522,7 +522,7 @@ class LightGuardAgent:
             }
 
         # Authorization Rule 2: Explicit Allowlist (Default-Deny least privilege)
-        if self.policy.allowed_tools and proposed_tool not in self.policy.allowed_tools:
+        if self.policy.allowed_tools is not None and proposed_tool not in self.policy.allowed_tools:
             elapsed_ms = (time.perf_counter() - start_t) * 1000.0
             if self.enable_telemetry and self.telemetry:
                 self.telemetry.record_action_block()
@@ -545,13 +545,16 @@ class LightGuardAgent:
                 "t3_latency_ms": elapsed_ms,
             }
 
-        # Authorization Rule 2b: Strict Authorization Mode enforcement
-        if getattr(self.policy, "authorization_mode", None) == AuthorizationMode.STRICT:
-            if self.policy.tool_registry and not self.policy.tool_registry.get_tool(proposed_tool):
+        # Authorization Rule 2b: Strict and Production-Secure Authorization Mode enforcement
+        if getattr(self.policy, "authorization_mode", None) in (
+            AuthorizationMode.STRICT,
+            AuthorizationMode.PRODUCTION_SECURE,
+        ):
+            if self.policy.tool_registry is not None and not self.policy.tool_registry.get_tool(proposed_tool):
                 elapsed_ms = (time.perf_counter() - start_t) * 1000.0
                 if self.enable_telemetry and self.telemetry:
                     self.telemetry.record_action_block()
-                reason = f"Strict Authorization Blocked: Tool '{proposed_tool}' is not registered in the active tool registry."
+                reason = f"Authorization Policy Blocked: Tool '{proposed_tool}' is not registered in the active tool registry."
                 code = SecurityReasonCode.LG_TOOL_NOT_REGISTERED
                 self._log_action_audit(
                     proposed_tool,
@@ -569,11 +572,18 @@ class LightGuardAgent:
                     "reason_code": code.value,
                     "t3_latency_ms": elapsed_ms,
                 }
-            elif not self.policy.tool_registry and not self.policy.allowed_tools:
+            elif (
+                (
+                    getattr(self.policy, "authorization_mode", None) == AuthorizationMode.STRICT
+                    or getattr(self.policy, "require_tool_registration", False)
+                )
+                and self.policy.tool_registry is None
+                and self.policy.allowed_tools is None
+            ):
                 elapsed_ms = (time.perf_counter() - start_t) * 1000.0
                 if self.enable_telemetry and self.telemetry:
                     self.telemetry.record_action_block()
-                reason = f"Strict Authorization Blocked: Tool '{proposed_tool}' cannot run without an allowlist or tool registry."
+                reason = f"Authorization Policy Blocked: Tool '{proposed_tool}' cannot run without an allowlist or tool registry (default-deny policy)."
                 code = SecurityReasonCode.LG_TOOL_NOT_IN_ALLOWLIST
                 self._log_action_audit(
                     proposed_tool,
